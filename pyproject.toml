@@ -11,8 +11,12 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+    "black>=24.0.0",
     "pytest>=8.0.0",
 ]
+
+[tool.black]
+line-length = 79
 
 [project.scripts]
 snc2fst = "snc2fst.main:app"

@@ -2,7 +2,13 @@ from __future__ import annotations
 
 from typing import Dict, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    model_validator,
+)
 
 FeatureValue = Literal["+", "-", "0"]
 
@@ -52,7 +58,9 @@ class Alphabet(BaseModel):
             if missing:
                 raise ValueError(f"Rows missing symbols: {', '.join(missing)}")
             if extra:
-                raise ValueError(f"Rows contain unknown symbols: {', '.join(extra)}")
+                raise ValueError(
+                    f"Rows contain unknown symbols: {', '.join(extra)}"
+                )
 
         feature_set = set(features)
         for row in self.rows:
@@ -78,12 +86,20 @@ class Alphabet(BaseModel):
         values: list[list[FeatureValue]],
     ) -> "Alphabet":
         if len(values) != len(features):
-            raise ValueError("Feature/value row count does not match features length.")
+            raise ValueError(
+                "Feature/value row count does not match features length."
+            )
         rows = []
         for idx, symbol in enumerate(symbols):
-            bundle = {feature: values[f_idx][idx] for f_idx, feature in enumerate(features)}
+            bundle = {
+                feature: values[f_idx][idx]
+                for f_idx, feature in enumerate(features)
+            }
             rows.append(SymbolFeatures(symbol=symbol, features=bundle))
-        return cls(feature_schema=FeatureSchema(symbols=symbols, features=features), rows=rows)
+        return cls(
+            feature_schema=FeatureSchema(symbols=symbols, features=features),
+            rows=rows,
+        )
 
 
 def _find_dupes(items: list[str]) -> list[str]:

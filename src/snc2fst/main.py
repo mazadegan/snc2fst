@@ -38,7 +38,9 @@ def _normalize_value(value: str) -> str:
         return "0"
     if cleaned in {"+", "-", "0"}:
         return cleaned
-    raise ValueError(f"Invalid feature value: {value!r} (expected '+', '-', '0', or blank)")
+    raise ValueError(
+        f"Invalid feature value: {value!r} (expected '+', '-', '0', or blank)"
+    )
 
 
 @app.command()
@@ -67,7 +69,9 @@ def _table_to_json(
 
     header = [cell.strip() for cell in rows[0]]
     if len(header) < 2:
-        raise typer.BadParameter("Header must contain an empty leading cell plus at least one symbol.")
+        raise typer.BadParameter(
+            "Header must contain an empty leading cell plus at least one symbol."
+        )
 
     symbols = header[1:]
     if any(symbol == "" for symbol in symbols):
@@ -100,15 +104,21 @@ def _table_to_json(
             message = format_validation_error(exc)
         raise typer.BadParameter(message) from exc
 
-    return json.dumps(alphabet.model_dump(by_alias=True), ensure_ascii=False, indent=2)
+    return json.dumps(
+        alphabet.model_dump(by_alias=True), ensure_ascii=False, indent=2
+    )
 
 
 @app.command("validate")
 def validate_table(
-    table_path: Path = typer.Argument(..., exists=True, dir_okay=False, readable=True),
+    table_path: Path = typer.Argument(
+        ..., exists=True, dir_okay=False, readable=True
+    ),
     output: Path | None = typer.Option(None, "--output", "-o", dir_okay=False),
     delimiter: str | None = typer.Option(None, "--delimiter", "-d"),
-    quiet: bool = typer.Option(False, "--quiet", "-q", help="Suppress success output."),
+    quiet: bool = typer.Option(
+        False, "--quiet", "-q", help="Suppress success output."
+    ),
 ) -> None:
     """Validate a CSV/TSV feature matrix as an alphabet."""
     output_json = _table_to_json(table_path, delimiter)
