@@ -471,8 +471,7 @@ def eval_rule(
             results_with_input.append({"input": word, "output": output_syms})
 
     if include_input:
-        payload_out = results_with_input
-        rendered = json.dumps(payload_out, ensure_ascii=False, indent=2) + "\n"
+        rendered = _format_word_pairs(results_with_input)
     else:
         rendered = _format_word_list(output_words)
     output.write_text(rendered, encoding="utf-8")
@@ -583,6 +582,35 @@ def _format_word_list(words: list[list[object]]) -> str:
         lines.append(f'  [{",".join(rendered_items)}]{suffix}')
     lines.append("]")
     return "\n".join(lines) + "\n"
+
+
+def _format_word_pairs(
+    pairs: list[dict[str, list[object]]],
+) -> str:
+    lines = ["["]
+    for idx, item in enumerate(pairs):
+        input_word = item.get("input", [])
+        output_word = item.get("output", [])
+        input_rendered = _format_word_inline(input_word)
+        output_rendered = _format_word_inline(output_word)
+        suffix = "," if idx < len(pairs) - 1 else ""
+        lines.append(
+            f'  {{"input": {input_rendered}, "output": {output_rendered}}}{suffix}'
+        )
+    lines.append("]")
+    return "\n".join(lines) + "\n"
+
+
+def _format_word_inline(word: list[object]) -> str:
+    rendered_items: list[str] = []
+    for item in word:
+        if isinstance(item, str):
+            rendered_items.append(json.dumps(item, ensure_ascii=False))
+        else:
+            rendered_items.append(
+                json.dumps(item, ensure_ascii=False, separators=(",", ":"))
+            )
+    return f'[{",".join(rendered_items)}]'
 
 
 def main() -> None:
