@@ -9,7 +9,8 @@ from pydantic import ValidationError
 
 from ._version import __version__
 from .alphabet import Alphabet, format_validation_error
-from .rules import RulesFile
+from .out_dsl import OutDslError, evaluate_out_dsl
+from .rules import RulesFile, Rule
 
 app = typer.Typer(add_completion=False)
 
@@ -109,18 +110,75 @@ def _table_to_json(
     )
 
 
-def _validate_rules_file(rules_path: Path) -> None:
+def _load_json(path: Path) -> dict:
     try:
-        payload = json.loads(rules_path.read_text(encoding="utf-8"))
+        return json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         raise typer.BadParameter(
             f"Invalid JSON: {exc.msg} (line {exc.lineno}, column {exc.colno})"
         ) from exc
 
+
+def _load_alphabet_features(alphabet_path: Path) -> set[str]:
+    if alphabet_path.suffix.lower() in {".csv", ".tsv", ".tab"}:
+        payload = json.loads(_table_to_json(alphabet_path, delimiter=None))
+    else:
+        payload = _load_json(alphabet_path)
     try:
-        RulesFile.model_validate(payload)
+        alphabet = Alphabet.model_validate(payload)
     except ValidationError as exc:
         raise typer.BadParameter(format_validation_error(exc)) from exc
+    return set(alphabet.feature_schema.features)
+
+
+def _bundle_from_rule(rule: Rule, label: str) -> dict[str, str]:
+    bundle: dict[str, str] = {}
+    for polarity, feature in getattr(rule, label):
+        bundle[feature] = polarity
+    return bundle
+
+
+def _validate_rule_features(
+    rule: Rule, features: set[str], label: str
+) -> None:
+    for _, feature in getattr(rule, label):
+        if feature not in features:
+            raise typer.BadParameter(
+                f"Rule {rule.id} {label} has unknown feature: {feature!r}"
+            )
+
+
+def _validate_rules_file(
+    rules_path: Path, alphabet_path: Path | None
+) -> None:
+    payload = _load_json(rules_path)
+
+    if alphabet_path is None:
+        raise typer.BadParameter(
+            "Rules validation requires an alphabet JSON file; pass --alphabet."
+        )
+
+    features = _load_alphabet_features(alphabet_path)
+
+    try:
+        rules = RulesFile.model_validate(payload).rules
+    except ValidationError as exc:
+        raise typer.BadParameter(format_validation_error(exc)) from exc
+    for rule in rules:
+        _validate_rule_features(rule, features, "inr")
+        _validate_rule_features(rule, features, "trm")
+        _validate_rule_features(rule, features, "cnd")
+        try:
+            evaluate_out_dsl(
+                rule.out,
+                inr=_bundle_from_rule(rule, "inr"),
+                trm=_bundle_from_rule(rule, "trm"),
+                features=features,
+            )
+        except OutDslError as exc:
+            raise typer.BadParameter(
+                f"Rule {rule.id} out is invalid: {exc}"
+            ) from exc
 
 
 @app.command("validate")
@@ -129,6 +187,9 @@ def validate(
         ..., exists=True, dir_okay=False, readable=True
     ),
     output: Path | None = typer.Option(None, "--output", "-o", dir_okay=False),
+    alphabet: Path | None = typer.Option(
+        None, "--alphabet", "-a", dir_okay=False, readable=True
+    ),
     delimiter: str | None = typer.Option(None, "--delimiter", "-d"),
     quiet: bool = typer.Option(
         False, "--quiet", "-q", help="Suppress success output."
@@ -140,7 +201,7 @@ def validate(
             raise typer.BadParameter(
                 "Output is only supported for CSV/TSV feature tables."
             )
-        _validate_rules_file(input_path)
+        _validate_rules_file(input_path, alphabet)
     else:
         output_json = _table_to_json(input_path, delimiter)
         if output:
