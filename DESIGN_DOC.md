@@ -2,7 +2,7 @@
 
 ## 0. Context
 
-**Goal:** Build a compiler that takes a **Search & Change (S&C)** grammar/ruleset and produces a **finite-state transducer (FST)** implementation suitable for downstream tooling (e.g., applying phonological rules to strings, composing with other machines, exporting to OpenFST/Pynini, analysis using The Language Toolkit, etc.).
+**Goal:** Build a compiler that takes a **Search & Change (S&C)** grammar/ruleset and produces a **finite-state transducer (FST)** implementation suitable for downstream tooling (e.g., applying phonological rules to strings, composing with other machines, exporting to OpenFST/Pynini, analysis using *The Language Toolkit*, etc.).
 
 **Working name:** `snc2fst`
 
@@ -27,11 +27,11 @@ We want a maintainable, testable compiler pipeline:
 * **JSON** (S&C rule definitions)
 * **CSV/TSV** (feature matrix source for the alphabet; converted into JSON via CLI)
 
-Grammar should be able to express:
+Grammar must be able to express:
 
 * Alphabet (segments or symbols)
 * Feature matrix for symbols
-* Rule set: list of Rules (consist of Inr/Trm/Dir/Out/Cnd)
+* Rule set: list of rules (each consisting of `Inr`, `Trm`, `Dir`, `Out`, `Cnd`)
 
 **Design decision (v0.1):** JSON is the canonical input format for rule definitions. CSV/TSV is supported only as a *source* format for feature tables, via a conversion command that produces the schema+rows JSON representation used by the compiler.
 
@@ -41,108 +41,128 @@ Grammar should be able to express:
 
 **Design decision (v0.1):** OpenFST text only. Other export targets (e.g., Pynini builder scripts) can be revisited after v0.1 once the core compilation semantics stabilize.
 
+---
+
 ## 3. Core concepts
 
 ### 3.1 Basic data model
 
 * **Symbol**: atomic token in strings (e.g., `a`, `p`, `tʃ`, `V`, etc.)
-* **Feature bundle**: `{feature: +|-|0}` tri-valued (0 = unspecified)
-* **Natural class**: predicate over symbols defined by feature constraints
-* **Rule**: `(Inr,Trm,Dir,Out,Cnd)`
+* **Feature bundle**: set of valued features `{⟨+,F⟩, ⟨-,F⟩}`, with implicit underspecification
+* **Natural class**: conjunction of valued feature constraints
+* **Rule**: `(Inr, Trm, Dir, Out, Cnd)`
 
-**Design decision:** *Symbols are not rewritten directly.* Rewrites are expressed as **feature updates** applied to the matched symbol(s). The surface output symbol is whichever segment in the alphabet matches the updated feature bundle (subject to well-formedness/uniqueness constraints).
+**Design decision:** *Symbols are not rewritten directly.* Rewrites are expressed as **feature updates** applied to the matched symbol(s). Any mapping from a resulting feature bundle to a surface symbol is handled outside the rule language.
 
 ### 3.2 Search & Change overview (compiler view)
 
-At a high level each rule defines:
+At a high level, each rule defines:
 
-* **Inr:** Where searches begin (Is a natural class)
-* **Trm:** Where searches end (Is a natural class)
-* **Dir:** Where searches go (LEFT or RIGHT)
-* **Out:** How segments should change (Is a function)
-* **Cnd:** Segments that license change (Is a natural class)
+* **Inr**: where searches begin (a natural class)
+* **Trm**: where searches end (a natural class)
+* **Dir**: where searches go (`LEFT` or `RIGHT`)
+* **Out**: how segments should change (a feature-update expression)
+* **Cnd**: segments that license change (a natural class)
+
+In v0.1, natural classes are expressed only as **conjunctions of valued features**. No disjunction or negation operators are provided.
 
 ---
 
-## 4. Architecture
+## 4. Rule format (JSON)
 
-### 4.1 Pipeline
+Rules are represented as **pure data objects** in JSON. Each rule has the following structure:
+
+```json
+{
+  "id": "spread_voice_right",
+  "dir": "RIGHT",
+  "inr": [["+", "Voice"]],
+  "trm": [["+", "Consonantal"]],
+  "cnd": [],
+  "out": "(unify (subtract TRM (proj TRM (Voice))) (proj INR (Voice)))"
+}
+```
+
+### 4.1 Natural classes (`inr`, `trm`, `cnd`)
+
+* Represented as **lists of valued feature tuples**: `[polarity, feature]`
+* Polarity is either `"+"` or `"-"`
+* A feature not mentioned is implicitly underspecified
+* An empty list `[]` imposes no constraints (matches all symbols)
+
+Natural classes are interpreted as **conjunctions** of their listed feature constraints.
+
+### 4.2 Direction (`dir`)
+
+* Must be one of: `"LEFT"` or `"RIGHT"`
+
+### 4.3 Out expression (`out`)
+
+* A **string** containing a program written in the *snc2fst Tiny Lisp*
+* Evaluates to a single **feature bundle**
+* May reference only the bound identifiers `INR` and `TRM`
+* Uses the operations `unify`, `subtract`, `proj`, and `lit`
+
+The DSL is intentionally pure and limited; it computes feature bundles but performs no mutation or control flow.
+
+---
+
+## 5. The Out DSL (Tiny Lisp)
+
+The `out` field is evaluated using a **tiny, safe, expression-only Lisp** defined separately (see *snc2fst Tiny Lisp — Design Doc*).
+
+Key properties:
+
+* Pure (no side effects)
+* Expression-only
+* Evaluates to a single feature bundle
+* Supports explicit feature literals via `(lit + F)` / `(lit - F)`
+* Validates feature names against the alphabet feature universe
+
+The DSL exists solely to express feature-bundle transformations in a way that mirrors the formal S&C definitions while remaining readable in JSON.
+
+---
+
+## 6. Architecture
 
 We do **not** need a large, general-purpose AST for v0.1, because the rule language is intentionally small and JSON already provides a tree structure.
 
-Instead we parse JSON directly into **typed config objects** (dataclasses / maybe pydantic models?), then validate + normalize those objects. If/when the rule language grows (macros, nested expressions, syntactic sugar), we can introduce an AST later.
-
-### 4.2 Modules
-
-* `parser/` — JSON → config objects
-* `schema/` — config types + validation
-* `features/` — feature bundles, unification, subtraction, natural classes
-* `ir/` — IR definitions (rule-lowered forms)
-* `compile/` — IR → FST
-* `export/` — OpenFST AT&T formatted text, etc.
-* `cli/` — `snc2fst compile ...`
-* `tests/` — unit + golden tests
+Instead, JSON is parsed directly into **typed configuration objects** (e.g., dataclasses or pydantic models), which are then validated and normalized. If the rule language grows (macros, syntactic sugar, etc.), an explicit AST layer can be introduced later.
 
 ---
 
-## 5. Intermediate representation (IR)
+## 7. Intermediate representation (IR)
 
-Design the IR to make compilation straightforward.
+The IR is designed to make compilation straightforward.
 
-### 5.1 Candidate IR primitives
+### 7.1 Candidate IR primitives
 
-* `ClassRef(name)` or `ClassPred(feature_constraints)`
-* `Literal(symbol)`
+* `ClassPred(feature_constraints)`
 * `Concat([...])`
 * `Union([...])`
-* `KleeneStar(x)` (maybe avoid for subsequential constraints)
-* `Capture(id, pattern)` (only if needed)
+* `KleeneStar(x)` (used sparingly)
 
-### 5.2 Rule IR shape
+## 7. FST compilation strategy
 
-A possible normalized shape:
+**Direct construction**: build a single transducer that computes the change set and outputs the rewritten string.
 
-* `LHS = (Inr,Trm,Dir,Cnd)` expressed as predicates over positions/symbols
-* `Out = feature_update_fn` that maps an input feature bundle → output feature bundle
-* `Application = parallel` (design decision: compute all licensed changes on the input, then apply them to produce output)
-
-Alpha-notation lowering might introduce **feature variables** that unify across multiple positions.
-
----
-
-## 6. FST compilation strategy
-
-### 6.1 Strategy options
-
-1. **Direct construction**: build a single transducer that (conceptually) computes the change set and outputs the rewritten string.
-
-2. **Factorized**: build helper machines (e.g., a recognizer that marks licensed positions) and compose.
-
-MVP recommendation: **direct construction** for the simplest behavior.
-
-### 6.2 Determinism & subsequentiality assumptions
+### 7.1 Determinism & subsequentiality assumptions
 
 Design decisions:
 
-* Feature system is **ternary**: `+`, `-`, `0` (underspecified)
+* Feature system is **ternary**: `+`, `-`, `0`
 * Backend/export target is **OpenFST text**
-* Rule application is **not iterative**: we compute the full set of licensed changes on the input, then apply them to produce output (parallel application)
-
-Implications to document/validate:
-
-* Define the match-selection policy used to compute the change set (e.g., leftmost-longest vs leftmost-shortest).
-* Define what happens under overlap/conflict (multiple changes propose different feature updates at one position).
-* Strictness requirements remain enforced (unique symbol resolution after applying `Out`).
+* Rule application is **parallel**, not iterative
 
 ---
 
-## 9. Milestones
+## 8. Milestones
 
 ### v0.1 (MVP)
 
+* Alphabet feature table import (CSV/TSV → JSON)
 * JSON grammar
-* alphabet feature table import (CSV/TSV → JSON)
-* symbols + feature matrix
-* one rule type: bounded context rewrite via feature updates
-* compile to OpenFST text
-* `validate` (rules *or* alphabet) + `compile` + `config table import`
+* Tiny Lisp evaluator for `out`
+* One rule type: bounded context rewrite via feature updates
+* Compile to OpenFST text
+* CLI: `validate`, `compile`
