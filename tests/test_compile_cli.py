@@ -37,3 +37,4 @@ def test_compile_writes_att_and_symtab(tmp_path: Path) -> None:
     assert symtab_path.exists()
     assert output_path.read_text(encoding="utf-8").strip()
     assert symtab_path.read_text(encoding="utf-8").strip()
+

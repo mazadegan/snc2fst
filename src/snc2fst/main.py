@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import csv
 import json
+import shutil
+import subprocess
 from pathlib import Path
 
 import typer
@@ -199,14 +201,31 @@ def _select_rule(rules: list[Rule], rule_id: str | None) -> Rule:
 @app.command("validate")
 def validate(
     input_path: Path = typer.Argument(
-        ..., exists=True, dir_okay=False, readable=True
+        ...,
+        exists=True,
+        dir_okay=False,
+        readable=True,
+        help="Rules JSON or alphabet CSV/TSV file to validate.",
     ),
     alphabet: Path | None = typer.Option(
-        None, "--alphabet", "-a", dir_okay=False, readable=True
+        None,
+        "--alphabet",
+        "-a",
+        dir_okay=False,
+        readable=True,
+        help="Alphabet CSV/TSV file required for rules validation.",
     ),
-    delimiter: str | None = typer.Option(None, "--delimiter", "-d"),
+    delimiter: str | None = typer.Option(
+        None,
+        "--delimiter",
+        "-d",
+        help="Override the delimiter for alphabet files (default: detect).",
+    ),
     quiet: bool = typer.Option(
-        False, "--quiet", "-q", help="Suppress success output."
+        False,
+        "--quiet",
+        "-q",
+        help="Suppress success output.",
     ),
 ) -> None:
     """Validate a JSON rules file or a CSV/TSV alphabet file."""
@@ -222,18 +241,47 @@ def validate(
 @app.command("compile")
 def compile_rule(
     rules_path: Path = typer.Argument(
-        ..., exists=True, dir_okay=False, readable=True
+        ...,
+        exists=True,
+        dir_okay=False,
+        readable=True,
+        help="Rules JSON file to compile.",
     ),
-    output: Path = typer.Argument(..., dir_okay=False, writable=True),
-    rule_id: str | None = typer.Option(None, "--rule-id"),
+    output: Path = typer.Argument(
+        ...,
+        dir_okay=False,
+        writable=True,
+        help="AT&T output path (ignored when --no-att is set).",
+    ),
+    rule_id: str | None = typer.Option(
+        None,
+        "--rule-id",
+        help="Rule id to compile (required if multiple rules).",
+    ),
     alphabet: Path | None = typer.Option(
-        None, "--alphabet", "-a", dir_okay=False, readable=True
+        None,
+        "--alphabet",
+        "-a",
+        dir_okay=False,
+        readable=True,
+        help="Alphabet CSV/TSV file for rule validation.",
     ),
     symtab: Path | None = typer.Option(
-        None, "--symtab", dir_okay=False, writable=True
+        None,
+        "--symtab",
+        dir_okay=False,
+        writable=True,
+        help="Symbol table output path (defaults next to output).",
+    ),
+    fst: Path | None = typer.Option(
+        None,
+        "--fst",
+        dir_okay=False,
+        writable=True,
+        help="Write a compiled OpenFst binary to this path.",
     ),
 ) -> None:
-    """Compile a single rule into AT&T text format."""
+    """Compile a single rule into AT&T text format (always writes .att and .sym)."""
     payload = _load_json(rules_path)
     try:
         rules = RulesFile.model_validate(payload).rules
@@ -260,8 +308,32 @@ def compile_rule(
 
     rule = _select_rule(rules, rule_id)
     machine = compile_tv(rule)
-    symtab_path = symtab or output.with_suffix(".sym")
+
+    if symtab is not None:
+        symtab_path = symtab
+    else:
+        symtab_path = output.with_suffix(".sym")
     write_att(machine, str(output), symtab_path=str(symtab_path))
+    if fst is not None:
+        _compile_fst(output, fst)
+
+
+def _compile_fst(att_path: Path, fst_path: Path) -> None:
+    if shutil.which("fstcompile") is None:
+        raise typer.BadParameter(
+            "fstcompile not found on PATH. Install OpenFst or omit --fst."
+        )
+    with fst_path.open("wb") as out_handle:
+        try:
+            subprocess.run(
+                ["fstcompile", str(att_path)],
+                check=True,
+                stdout=out_handle,
+            )
+        except subprocess.CalledProcessError as exc:
+            raise typer.BadParameter(
+                f"fstcompile failed with exit code {exc.returncode}."
+            ) from exc
 
 
 def main() -> None:
