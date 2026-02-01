@@ -20,6 +20,7 @@ def cli() -> None:
 
 
 def _detect_delimiter(path: Path, sample: str, delimiter: str | None) -> str:
+    """Resolve the CSV/TSV delimiter from user input, extension, or sample text."""
     if delimiter:
         return delimiter
     suffix = path.suffix.lower()
@@ -31,6 +32,7 @@ def _detect_delimiter(path: Path, sample: str, delimiter: str | None) -> str:
 
 
 def _normalize_value(value: str) -> str:
+    """Normalize a cell to '+', '-', or '0', treating blank as '0'."""
     cleaned = value.strip()
     if cleaned == "":
         return "0"
@@ -45,13 +47,12 @@ def version() -> None:
     typer.echo(__version__)
 
 
-@app.command("import-table")
-def import_table(
-    table_path: Path = typer.Argument(..., exists=True, dir_okay=False, readable=True),
-    output: Path | None = typer.Option(None, "--output", "-o", dir_okay=False),
-    delimiter: str | None = typer.Option(None, "--delimiter", "-d"),
-) -> None:
-    """Convert a CSV/TSV feature matrix into JSON."""
+@app.command("validate")
+def _table_to_json(
+    table_path: Path,
+    delimiter: str | None,
+) -> str:
+    """Parse a feature table and return JSON for the Alphabet model."""
     text = table_path.read_text(encoding="utf-8-sig")
     if not text.strip():
         raise typer.BadParameter("Input file is empty.")
@@ -99,12 +100,23 @@ def import_table(
             message = format_validation_error(exc)
         raise typer.BadParameter(message) from exc
 
-    output_json = json.dumps(alphabet.model_dump(by_alias=True), ensure_ascii=False, indent=2)
+    return json.dumps(alphabet.model_dump(by_alias=True), ensure_ascii=False, indent=2)
 
+
+@app.command("validate")
+def validate_table(
+    table_path: Path = typer.Argument(..., exists=True, dir_okay=False, readable=True),
+    output: Path | None = typer.Option(None, "--output", "-o", dir_okay=False),
+    delimiter: str | None = typer.Option(None, "--delimiter", "-d"),
+    quiet: bool = typer.Option(False, "--quiet", "-q", help="Suppress success output."),
+) -> None:
+    """Validate a CSV/TSV feature matrix as an alphabet."""
+    output_json = _table_to_json(table_path, delimiter)
     if output:
         output.write_text(output_json + "\n", encoding="utf-8")
-    else:
-        typer.echo(output_json)
+
+    if not quiet:
+        typer.echo("OK")
 
 
 def main() -> None:
