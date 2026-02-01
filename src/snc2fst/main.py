@@ -4,6 +4,7 @@ import csv
 import json
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 import typer
@@ -370,6 +371,25 @@ def eval_rule(
         "--include-input",
         help="Include both input and output words in the result.",
     ),
+    fst: Path | None = typer.Option(
+        None,
+        "--fst",
+        dir_okay=False,
+        readable=True,
+        help="Use a compiled OpenFst binary to evaluate words.",
+    ),
+    fst_symtab: Path | None = typer.Option(
+        None,
+        "--fst-symtab",
+        dir_okay=False,
+        readable=True,
+        help="Symbol table for --fst (defaults to <fst>.sym).",
+    ),
+    compare: bool = typer.Option(
+        False,
+        "--compare",
+        help="Compare FST output to the reference evaluator.",
+    ),
     strict: bool = typer.Option(
         False,
         "--strict",
@@ -429,46 +449,108 @@ def eval_rule(
             )
         bundle_to_symbol[bundle_key] = row.symbol
 
-    from .evaluator import evaluate_rule_on_bundles
+    output_words: list[list[object]] = []
+    results_with_input: list[dict[str, list[object]]] = []
 
-    output_words: list[list[str]] = []
-    results_with_input: list[dict[str, list[str]]] = []
+    if fst is not None:
+        output_words = _evaluate_with_fst(
+            fst=fst,
+            fst_symtab=fst_symtab,
+            words=segments,
+            feature_order=feature_order,
+            symbol_to_bundle=symbol_to_bundle,
+            bundle_to_symbol=bundle_to_symbol,
+            strict=strict,
+        )
+        if compare:
+            from .evaluator import evaluate_rule_on_bundles
 
-    for idx, word in enumerate(segments):
-        if not isinstance(word, list):
-            raise typer.BadParameter(
-                f"Word at index {idx} is not an array of symbols."
-            )
-        bundles: list[dict[str, str]] = []
-        for sym in word:
-            if not isinstance(sym, str) or not sym.strip():
-                raise typer.BadParameter(
-                    f"Word {idx} contains a non-string symbol."
-                )
-            if sym not in symbol_to_bundle:
-                raise typer.BadParameter(
-                    f"Word {idx} has unknown symbol: {sym!r}"
-                )
-            bundles.append(symbol_to_bundle[sym])
-
-        evaluated = evaluate_rule_on_bundles(rule, bundles)
-        output_syms: list[object] = []
-        for bundle in evaluated:
-            bundle_key = tuple(
-                bundle.get(feature, "0") for feature in feature_order
-            )
-            if bundle_key not in bundle_to_symbol:
-                if strict:
+            ref_words: list[list[object]] = []
+            for idx, word in enumerate(segments):
+                if not isinstance(word, list):
                     raise typer.BadParameter(
-                        f"Output bundle has no symbol: {bundle_key}"
+                        f"Word at index {idx} is not an array of symbols."
                     )
-                output_syms.append(bundle)
-            else:
-                output_syms.append(bundle_to_symbol[bundle_key])
+                bundles: list[dict[str, str]] = []
+                for sym in word:
+                    if not isinstance(sym, str) or not sym.strip():
+                        raise typer.BadParameter(
+                            f"Word {idx} contains a non-string symbol."
+                        )
+                    if sym not in symbol_to_bundle:
+                        raise typer.BadParameter(
+                            f"Word {idx} has unknown symbol: {sym!r}"
+                        )
+                    bundles.append(symbol_to_bundle[sym])
+                evaluated = evaluate_rule_on_bundles(rule, bundles)
+                output_syms: list[object] = []
+                for bundle in evaluated:
+                    bundle_key = tuple(
+                        bundle.get(feature, "0") for feature in feature_order
+                    )
+                    if bundle_key not in bundle_to_symbol:
+                        if strict:
+                            raise typer.BadParameter(
+                                f"Output bundle has no symbol: {bundle_key}"
+                            )
+                        output_syms.append(bundle)
+                    else:
+                        output_syms.append(bundle_to_symbol[bundle_key])
+                ref_words.append(output_syms)
 
-        output_words.append(output_syms)
+            diffs = _diff_word_lists(ref_words, output_words)
+            if diffs:
+                message = "FST output differs from reference:\n" + "\n".join(
+                    diffs
+                )
+                raise typer.BadParameter(message)
         if include_input:
-            results_with_input.append({"input": word, "output": output_syms})
+            results_with_input = [
+                {"input": word, "output": output_word}
+                for word, output_word in zip(segments, output_words)
+            ]
+    else:
+        from .evaluator import evaluate_rule_on_bundles
+
+        for idx, word in enumerate(segments):
+            if not isinstance(word, list):
+                raise typer.BadParameter(
+                    f"Word at index {idx} is not an array of symbols."
+                )
+            bundles: list[dict[str, str]] = []
+            for sym in word:
+                if not isinstance(sym, str) or not sym.strip():
+                    raise typer.BadParameter(
+                        f"Word {idx} contains a non-string symbol."
+                    )
+                if sym not in symbol_to_bundle:
+                    raise typer.BadParameter(
+                        f"Word {idx} has unknown symbol: {sym!r}"
+                    )
+                bundles.append(symbol_to_bundle[sym])
+
+            evaluated = evaluate_rule_on_bundles(rule, bundles)
+            output_syms: list[object] = []
+            for bundle in evaluated:
+                bundle_key = tuple(
+                    bundle.get(feature, "0") for feature in feature_order
+                )
+                if bundle_key not in bundle_to_symbol:
+                    if strict:
+                        raise typer.BadParameter(
+                            f"Output bundle has no symbol: {bundle_key}"
+                        )
+                    output_syms.append(bundle)
+                else:
+                    output_syms.append(bundle_to_symbol[bundle_key])
+
+            output_words.append(output_syms)
+            if include_input:
+                results_with_input.append(
+                    {"input": word, "output": output_syms}
+                )
+        if compare:
+            raise typer.BadParameter("--compare requires --fst.")
 
     if include_input:
         rendered = _format_word_pairs(results_with_input)
@@ -611,6 +693,380 @@ def _format_word_inline(word: list[object]) -> str:
                 json.dumps(item, ensure_ascii=False, separators=(",", ":"))
             )
     return f'[{",".join(rendered_items)}]'
+
+
+def _diff_word_lists(
+    expected: list[list[object]],
+    actual: list[list[object]],
+    *,
+    max_diffs: int = 10,
+) -> list[str]:
+    diffs: list[str] = []
+    word_count = min(len(expected), len(actual))
+    for idx in range(word_count):
+        if expected[idx] == actual[idx]:
+            continue
+        diffs.append(
+            f"word {idx}: expected={_format_word_inline(expected[idx])} actual={_format_word_inline(actual[idx])}"
+        )
+        if len(diffs) >= max_diffs:
+            break
+    if len(expected) != len(actual) and len(diffs) < max_diffs:
+        diffs.append(
+            f"word count mismatch: expected={len(expected)} actual={len(actual)}"
+        )
+    return diffs
+
+
+def _evaluate_with_fst(
+    *,
+    fst: Path,
+    fst_symtab: Path | None,
+    words: list[object],
+    feature_order: tuple[str, ...],
+    symbol_to_bundle: dict[str, dict[str, str]],
+    bundle_to_symbol: dict[tuple[str, ...], str],
+    strict: bool,
+) -> list[list[object]]:
+    _ensure_openfst_tools(
+        ["fstcompile", "fstcompose", "fstshortestpath", "fstprint"]
+    )
+    symtab_path = fst_symtab or fst.with_suffix(".sym")
+    if not symtab_path.exists():
+        raise typer.BadParameter(
+            f"Symbol table not found: {symtab_path}"
+        )
+
+    symtab = _load_symtab(symtab_path)
+    v_order = _infer_feature_order(symtab.symbols)
+    if set(v_order) != set(feature_order):
+        raise typer.BadParameter(
+            "Alphabet features do not match FST symtab features: "
+            f"alphabet={sorted(feature_order)}; fst={sorted(v_order)}"
+        )
+    label_map = _build_label_map(symtab, v_order)
+
+    output_words: list[list[object]] = []
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_root = Path(temp_dir)
+        for idx, word in enumerate(words):
+            if not isinstance(word, list):
+                raise typer.BadParameter(
+                    f"Word at index {idx} is not an array of symbols."
+                )
+            input_symbols: list[str] = []
+            for sym in word:
+                if not isinstance(sym, str) or not sym.strip():
+                    raise typer.BadParameter(
+                        f"Word {idx} contains a non-string symbol."
+                    )
+                if sym not in symbol_to_bundle:
+                    raise typer.BadParameter(
+                        f"Word {idx} has unknown symbol: {sym!r}"
+                    )
+                bundle = symbol_to_bundle[sym]
+                label = _bundle_to_label(
+                    bundle, v_order, label_map
+                )
+                input_symbols.append(str(label))
+
+            input_att = temp_root / f"input_{idx}.att"
+            input_fst = temp_root / f"input_{idx}.fst"
+            composed_fst = temp_root / f"composed_{idx}.fst"
+            output_fst = temp_root / f"output_{idx}.fst"
+            input_att.write_text(
+                _render_input_att(input_symbols), encoding="utf-8"
+            )
+
+            _run_command(
+                [
+                    "fstcompile",
+                    str(input_att),
+                    str(input_fst),
+                ],
+            )
+            _run_command(
+                ["fstcompose", str(input_fst), str(fst), str(composed_fst)],
+            )
+            _run_command(
+                ["fstshortestpath", str(composed_fst), str(output_fst)],
+            )
+            printed = _run_command(
+                [
+                    "fstprint",
+                    str(output_fst),
+                ],
+                capture_stdout=True,
+            )
+            output_symbols = _parse_fstprint_output(printed)
+            output_words.append(
+                _symbols_to_alphabet(
+                    output_symbols,
+                    v_order,
+                    feature_order,
+                    bundle_to_symbol,
+                    strict,
+                )
+            )
+
+    return output_words
+
+
+def _symbols_to_alphabet(
+    symbols: list[str],
+    v_order: tuple[str, ...],
+    feature_order: tuple[str, ...],
+    bundle_to_symbol: dict[tuple[str, ...], str],
+    strict: bool,
+) -> list[object]:
+    output: list[object] = []
+    for sym in symbols:
+        if sym.isdigit():
+            bundle = _decode_label_to_bundle(int(sym), v_order)
+        else:
+            bundle = _symbol_string_to_bundle(sym, v_order)
+        bundle_key = tuple(bundle.get(feature, "0") for feature in feature_order)
+        if bundle_key not in bundle_to_symbol:
+            if strict:
+                raise typer.BadParameter(
+                    f"Output bundle has no symbol: {bundle_key}"
+                )
+            output.append(bundle)
+        else:
+            output.append(bundle_to_symbol[bundle_key])
+    return output
+
+
+def _build_label_map(
+    symtab: _Symtab, v_order: tuple[str, ...]
+) -> dict[tuple[str, ...], int]:
+    mapping: dict[tuple[str, ...], int] = {}
+    for symbol, label in symtab.symbols.items():
+        if symbol == "<eps>":
+            continue
+        bundle = _symbol_string_to_bundle(symbol, v_order)
+        bundle_key = tuple(
+            bundle.get(feature, "0") for feature in v_order
+        )
+        mapping[bundle_key] = label
+    return mapping
+
+
+def _bundle_to_label(
+    bundle: dict[str, str],
+    v_order: tuple[str, ...],
+    label_map: dict[tuple[str, ...], int],
+) -> int:
+    key = tuple(bundle.get(feature, "0") for feature in v_order)
+    if key not in label_map:
+        raise typer.BadParameter(
+            f"Input bundle has no label: {key}"
+        )
+    return label_map[key]
+
+
+def _decode_label_to_bundle(
+    label: int, v_order: tuple[str, ...]
+) -> dict[str, str]:
+    if label <= 0:
+        raise typer.BadParameter(
+            f"Invalid label: {label}"
+        )
+    value = label - 1
+    bundle: dict[str, str] = {}
+    for feature in v_order:
+        digit = value % 3
+        if digit == 1:
+            bundle[feature] = "+"
+        elif digit == 2:
+            bundle[feature] = "-"
+        value //= 3
+    return bundle
+
+
+def _render_input_att(symbols: list[str]) -> str:
+    if not symbols:
+        return "0 0\n"
+    lines: list[str] = []
+    for idx, sym in enumerate(symbols):
+        lines.append(f"{idx} {idx + 1} {sym} {sym} 0")
+    lines.append(f"{len(symbols)} 0")
+    return "\n".join(lines) + "\n"
+
+
+def _parse_fstprint_output(text: str) -> list[str]:
+    arcs: list[tuple[int, str]] = []
+    for line in text.splitlines():
+        parts = line.split()
+        if len(parts) < 4:
+            continue
+        src = int(parts[0])
+        olabel = parts[3]
+        if olabel == "<eps>":
+            continue
+        arcs.append((src, olabel))
+    arcs.sort(key=lambda item: item[0])
+    return [olabel for _, olabel in arcs]
+
+
+class _Symtab:
+    def __init__(self, symbols: dict[str, int]):
+        self.symbols = symbols
+
+
+def _load_symtab(path: Path) -> _Symtab:
+    symbols: dict[str, int] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        parts = line.split()
+        if len(parts) != 2:
+            raise typer.BadParameter(
+                f"Invalid symtab line: {line!r}"
+            )
+        symbol, label = parts
+        symbols[symbol] = int(label)
+    return _Symtab(symbols)
+
+
+def _infer_feature_order(symbols: dict[str, int]) -> tuple[str, ...]:
+    for symbol in symbols:
+        if symbol == "<eps>":
+            continue
+        return tuple(_parse_symbol_part(part)[0] for part in symbol.split("_"))
+    raise typer.BadParameter("Symtab contains no symbols.")
+
+
+def _bundle_to_symbol_string(
+    bundle: dict[str, str],
+    v_order: tuple[str, ...],
+    symtab: _Symtab,
+) -> str:
+    parts: list[str] = []
+    for feature in v_order:
+        value = bundle.get(feature, "0")
+        if value not in {"+", "-", "0"}:
+            raise typer.BadParameter(
+                f"Invalid bundle value for {feature!r}: {value!r}"
+            )
+        parts.append(f"{feature}{value}")
+    symbol = "_".join(parts)
+    if symbol not in symtab.symbols:
+        raise typer.BadParameter(
+            f"Symbol not in symtab: {symbol!r}"
+        )
+    return symbol
+
+
+def _symbol_string_to_bundle(
+    symbol: str, v_order: tuple[str, ...]
+) -> dict[str, str]:
+    parts = symbol.split("_")
+    if len(parts) != len(v_order):
+        raise typer.BadParameter(
+            f"Symbol does not match feature order: {symbol!r}"
+        )
+    bundle: dict[str, str] = {}
+    for part, feature in zip(parts, v_order):
+        name, value = _parse_symbol_part(part)
+        if name != feature:
+            raise typer.BadParameter(
+                f"Symbol feature mismatch: {symbol!r}"
+            )
+        if value != "0":
+            bundle[feature] = value
+    return bundle
+
+
+def _parse_symbol_part(part: str) -> tuple[str, str]:
+    if not part:
+        raise typer.BadParameter("Empty symbol part.")
+    value = part[-1]
+    name = part[:-1]
+    if value not in {"+", "-", "0"} or not name:
+        raise typer.BadParameter(
+            f"Invalid symbol part: {part!r}"
+        )
+    return name, value
+
+
+def _ensure_openfst_tools(tools: list[str]) -> None:
+    missing = [tool for tool in tools if shutil.which(tool) is None]
+    if missing:
+        raise typer.BadParameter(
+            "OpenFst tools not found on PATH: " + ", ".join(missing)
+        )
+
+
+def _run_command(
+    args: list[str],
+    *,
+    stdout_path: Path | None = None,
+    capture_stdout: bool = False,
+) -> str:
+    if stdout_path is not None and capture_stdout:
+        raise typer.BadParameter("Invalid command configuration.")
+    if stdout_path is not None:
+        try:
+            result = subprocess.run(
+                args,
+                check=True,
+                capture_output=True,
+            )
+        except subprocess.CalledProcessError as exc:
+            stderr = (
+                exc.stderr.decode().strip()
+                if exc.stderr
+                else ""
+            )
+            stdout = (
+                exc.stdout.decode().strip()
+                if exc.stdout
+                else ""
+            )
+            message = stderr or stdout
+            raise typer.BadParameter(
+                _format_command_error(args[0], exc.returncode, message)
+            ) from exc
+        if result.stderr:
+            stderr = result.stderr.decode().strip()
+            if stderr:
+                raise typer.BadParameter(
+                    _format_command_error(args[0], 0, stderr)
+                )
+        stdout_path.write_bytes(result.stdout)
+        return ""
+    if capture_stdout:
+        try:
+            result = subprocess.run(
+                args, check=True, capture_output=True, text=True
+            )
+        except subprocess.CalledProcessError as exc:
+            stderr = exc.stderr.strip() if exc.stderr else ""
+            raise typer.BadParameter(
+                _format_command_error(args[0], exc.returncode, stderr)
+            ) from exc
+        return result.stdout
+    try:
+        subprocess.run(args, check=True, capture_output=True)
+    except subprocess.CalledProcessError as exc:
+        stderr = (
+            exc.stderr.decode().strip() if exc.stderr else ""
+        )
+        stdout = (
+            exc.stdout.decode().strip() if exc.stdout else ""
+        )
+        message = stderr or stdout
+        raise typer.BadParameter(
+            _format_command_error(args[0], exc.returncode, message)
+        ) from exc
+    return ""
+
+
+def _format_command_error(cmd: str, code: int, stderr: str) -> str:
+    if stderr:
+        return f"Command failed ({cmd}): {stderr}"
+    return f"Command failed with exit code {code}: {cmd}"
 
 
 def main() -> None:
