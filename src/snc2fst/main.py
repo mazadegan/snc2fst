@@ -524,6 +524,7 @@ def eval_rule(
             strict=strict,
         )
         fst_words = _evaluate_with_fst(
+            rule=rule,
             fst=fst,
             fst_symtab=fst_symtab,
             words=segments,
@@ -557,6 +558,7 @@ def eval_rule(
             ]
     elif fst is not None:
         output_words = _evaluate_with_fst(
+            rule=rule,
             fst=fst,
             fst_symtab=fst_symtab,
             words=segments,
@@ -863,8 +865,9 @@ def _evaluate_with_tv(
             raise typer.BadParameter(
                 f"Word at index {idx} is not an array of symbols."
             )
+        word_symbols = word[::-1] if rule.dir == "RIGHT" else word
         bundles: list[dict[str, str]] = []
-        for sym in word:
+        for sym in word_symbols:
             if not isinstance(sym, str) or not sym.strip():
                 raise typer.BadParameter(
                     f"Word {idx} contains a non-string symbol."
@@ -893,6 +896,8 @@ def _evaluate_with_tv(
                 output_syms.append(bundle)
             else:
                 output_syms.append(bundle_to_symbol[bundle_key])
+        if rule.dir == "RIGHT":
+            output_syms = list(reversed(output_syms))
         output_words.append(output_syms)
     return output_words
 
@@ -926,6 +931,7 @@ def _tv_tuple_to_bundle(
 
 def _evaluate_with_fst(
     *,
+    rule: Rule,
     fst: Path,
     fst_symtab: Path | None,
     words: list[object],
@@ -960,8 +966,9 @@ def _evaluate_with_fst(
                 raise typer.BadParameter(
                     f"Word at index {idx} is not an array of symbols."
                 )
+            word_symbols = word[::-1] if rule.dir == "RIGHT" else word
             input_symbols: list[str] = []
-            for sym in word:
+            for sym in word_symbols:
                 if not isinstance(sym, str) or not sym.strip():
                     raise typer.BadParameter(
                         f"Word {idx} contains a non-string symbol."
@@ -1005,15 +1012,16 @@ def _evaluate_with_fst(
                 capture_stdout=True,
             )
             output_symbols = _parse_fstprint_output(printed)
-            output_words.append(
-                _symbols_to_alphabet(
-                    output_symbols,
-                    v_order,
-                    feature_order,
-                    bundle_to_symbol,
-                    strict,
-                )
+            output_syms = _symbols_to_alphabet(
+                output_symbols,
+                v_order,
+                feature_order,
+                bundle_to_symbol,
+                strict,
             )
+            if rule.dir == "RIGHT":
+                output_syms = list(reversed(output_syms))
+            output_words.append(output_syms)
 
     return output_words
 

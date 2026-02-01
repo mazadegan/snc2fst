@@ -1,3 +1,4 @@
+import random
 import sys
 from pathlib import Path
 
@@ -86,3 +87,32 @@ def _tuple_for(order: tuple[str, ...], bundle: dict[str, str]) -> tuple[int, ...
         else:
             values.append(0)
     return tuple(values)
+
+
+def test_run_tv_machine_randomized_matches_reference() -> None:
+    random.seed(0)
+    rule = Rule(
+        id="r1",
+        dir="LEFT",
+        inr=[("+", "Voice")],
+        trm=[("+", "Consonantal")],
+        cnd=[],
+        out="(proj TRM (Voice))",
+    )
+    machine = compile_tv(rule)
+    v_order = machine.v_order
+    symbols = [
+        {"Voice": "+", "Consonantal": "0"},
+        {"Voice": "-", "Consonantal": "+"},
+        {"Voice": "+", "Consonantal": "0"},
+        {"Voice": "0", "Consonantal": "-"},
+        {"Voice": "-", "Consonantal": "0"},
+    ]
+
+    for _ in range(50):
+        length = random.randint(0, 6)
+        bundles = [random.choice(symbols) for _ in range(length)]
+        inputs = [_tuple_for(v_order, bundle) for bundle in bundles]
+        expected_bundles = evaluate_rule_on_bundles(rule, bundles)
+        expected = [_tuple_for(v_order, bundle) for bundle in expected_bundles]
+        assert run_tv_machine(machine, inputs) == expected
