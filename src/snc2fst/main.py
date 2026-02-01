@@ -9,6 +9,7 @@ from pydantic import ValidationError
 
 from ._version import __version__
 from .alphabet import Alphabet, format_validation_error
+from .rules import RulesFile
 
 app = typer.Typer(add_completion=False)
 
@@ -49,7 +50,6 @@ def version() -> None:
     typer.echo(__version__)
 
 
-@app.command("validate")
 def _table_to_json(
     table_path: Path,
     delimiter: str | None,
@@ -109,9 +109,23 @@ def _table_to_json(
     )
 
 
+def _validate_rules_file(rules_path: Path) -> None:
+    try:
+        payload = json.loads(rules_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise typer.BadParameter(
+            f"Invalid JSON: {exc.msg} (line {exc.lineno}, column {exc.colno})"
+        ) from exc
+
+    try:
+        RulesFile.model_validate(payload)
+    except ValidationError as exc:
+        raise typer.BadParameter(format_validation_error(exc)) from exc
+
+
 @app.command("validate")
-def validate_table(
-    table_path: Path = typer.Argument(
+def validate(
+    input_path: Path = typer.Argument(
         ..., exists=True, dir_okay=False, readable=True
     ),
     output: Path | None = typer.Option(None, "--output", "-o", dir_okay=False),
@@ -120,10 +134,17 @@ def validate_table(
         False, "--quiet", "-q", help="Suppress success output."
     ),
 ) -> None:
-    """Validate a CSV/TSV feature matrix as an alphabet."""
-    output_json = _table_to_json(table_path, delimiter)
-    if output:
-        output.write_text(output_json + "\n", encoding="utf-8")
+    """Validate a rules JSON file or a CSV/TSV feature matrix."""
+    if input_path.suffix.lower() == ".json":
+        if output is not None:
+            raise typer.BadParameter(
+                "Output is only supported for CSV/TSV feature tables."
+            )
+        _validate_rules_file(input_path)
+    else:
+        output_json = _table_to_json(input_path, delimiter)
+        if output:
+            output.write_text(output_json + "\n", encoding="utf-8")
 
     if not quiet:
         typer.echo("OK")
