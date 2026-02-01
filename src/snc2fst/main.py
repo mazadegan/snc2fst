@@ -470,11 +470,12 @@ def eval_rule(
         if include_input:
             results_with_input.append({"input": word, "output": output_syms})
 
-    payload_out = results_with_input if include_input else output_words
-    output.write_text(
-        json.dumps(payload_out, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
+    if include_input:
+        payload_out = results_with_input
+        rendered = json.dumps(payload_out, ensure_ascii=False, indent=2) + "\n"
+    else:
+        rendered = _format_word_list(output_words)
+    output.write_text(rendered, encoding="utf-8")
 
 
 @app.command("generate")
@@ -565,6 +566,23 @@ def _compile_fst(att_path: Path, fst_path: Path) -> None:
             raise typer.BadParameter(
                 f"fstcompile failed with exit code {exc.returncode}."
             ) from exc
+
+
+def _format_word_list(words: list[list[object]]) -> str:
+    lines = ["["]
+    for idx, word in enumerate(words):
+        rendered_items: list[str] = []
+        for item in word:
+            if isinstance(item, str):
+                rendered_items.append(json.dumps(item, ensure_ascii=False))
+            else:
+                rendered_items.append(
+                    json.dumps(item, ensure_ascii=False, separators=(",", ":"))
+                )
+        suffix = "," if idx < len(words) - 1 else ""
+        lines.append(f'  [{",".join(rendered_items)}]{suffix}')
+    lines.append("]")
+    return "\n".join(lines) + "\n"
 
 
 def main() -> None:
