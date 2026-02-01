@@ -12,14 +12,9 @@ from snc2fst.main import app
 
 
 def test_validate_rules_json(tmp_path: Path) -> None:
-    alphabet = {
-        "schema": {"symbols": ["a"], "features": ["Voice", "Consonantal"]},
-        "rows": [
-            {"symbol": "a", "features": {"Voice": "0", "Consonantal": "0"}}
-        ],
-    }
-    alphabet_path = tmp_path / "alphabet.json"
-    alphabet_path.write_text(json.dumps(alphabet), encoding="utf-8")
+    alphabet_content = ",a\nVoice,0\nConsonantal,0\n"
+    alphabet_path = tmp_path / "alphabet.csv"
+    alphabet_path.write_text(alphabet_content, encoding="utf-8")
 
     rules = {
         "rules": [
@@ -45,12 +40,9 @@ def test_validate_rules_json(tmp_path: Path) -> None:
 
 
 def test_validate_rules_unknown_out_feature(tmp_path: Path) -> None:
-    alphabet = {
-        "schema": {"symbols": ["a"], "features": ["Voice"]},
-        "rows": [{"symbol": "a", "features": {"Voice": "0"}}],
-    }
-    alphabet_path = tmp_path / "alphabet.json"
-    alphabet_path.write_text(json.dumps(alphabet), encoding="utf-8")
+    alphabet_content = ",a\nVoice,0\n"
+    alphabet_path = tmp_path / "alphabet.csv"
+    alphabet_path.write_text(alphabet_content, encoding="utf-8")
 
     rules = {
         "rules": [

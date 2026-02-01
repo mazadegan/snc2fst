@@ -1,4 +1,3 @@
-import json
 import sys
 from pathlib import Path
 
@@ -16,23 +15,10 @@ def test_validate_csv_example(tmp_path: Path) -> None:
     table_path = tmp_path / "table.csv"
     table_path.write_text(csv_content, encoding="utf-8")
 
-    output_path = tmp_path / "out.json"
     runner = CliRunner()
-    result = runner.invoke(
-        app,
-        ["validate", str(table_path), "--output", str(output_path)],
-    )
+    result = runner.invoke(app, ["validate", str(table_path)])
     assert result.exit_code == 0, result.output
     assert result.output.strip() == "OK"
-
-    payload = json.loads(output_path.read_text(encoding="utf-8"))
-    assert payload["schema"]["symbols"] == ["a", "b", "c"]
-    assert payload["schema"]["features"] == ["voice", "nasal"]
-    assert payload["rows"] == [
-        {"symbol": "a", "features": {"voice": "+", "nasal": "0"}},
-        {"symbol": "b", "features": {"voice": "-", "nasal": "+"}},
-        {"symbol": "c", "features": {"voice": "0", "nasal": "-"}},
-    ]
 
 
 def test_validate_tsv_example(tmp_path: Path) -> None:
@@ -41,19 +27,6 @@ def test_validate_tsv_example(tmp_path: Path) -> None:
     table_path.write_text(tsv_content, encoding="utf-8")
 
     runner = CliRunner()
-    output_path = tmp_path / "out.json"
-    result = runner.invoke(
-        app,
-        ["validate", str(table_path), "--output", str(output_path)],
-    )
+    result = runner.invoke(app, ["validate", str(table_path)])
     assert result.exit_code == 0, result.output
     assert result.output.strip() == "OK"
-
-    payload = json.loads(output_path.read_text(encoding="utf-8"))
-    assert payload["schema"]["symbols"] == ["a", "b", "c"]
-    assert payload["schema"]["features"] == ["voice", "nasal"]
-    assert payload["rows"] == [
-        {"symbol": "a", "features": {"voice": "+", "nasal": "0"}},
-        {"symbol": "b", "features": {"voice": "-", "nasal": "+"}},
-        {"symbol": "c", "features": {"voice": "0", "nasal": "-"}},
-    ]

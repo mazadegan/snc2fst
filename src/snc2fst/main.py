@@ -120,10 +120,11 @@ def _load_json(path: Path) -> dict:
 
 
 def _load_alphabet_features(alphabet_path: Path) -> set[str]:
-    if alphabet_path.suffix.lower() in {".csv", ".tsv", ".tab"}:
-        payload = json.loads(_table_to_json(alphabet_path, delimiter=None))
-    else:
-        payload = _load_json(alphabet_path)
+    if alphabet_path.suffix.lower() not in {".csv", ".tsv", ".tab"}:
+        raise typer.BadParameter(
+            "Alphabet must be a CSV/TSV feature table."
+        )
+    payload = json.loads(_table_to_json(alphabet_path, delimiter=None))
     try:
         alphabet = Alphabet.model_validate(payload)
     except ValidationError as exc:
@@ -186,7 +187,6 @@ def validate(
     input_path: Path = typer.Argument(
         ..., exists=True, dir_okay=False, readable=True
     ),
-    output: Path | None = typer.Option(None, "--output", "-o", dir_okay=False),
     alphabet: Path | None = typer.Option(
         None, "--alphabet", "-a", dir_okay=False, readable=True
     ),
@@ -195,17 +195,11 @@ def validate(
         False, "--quiet", "-q", help="Suppress success output."
     ),
 ) -> None:
-    """Validate a rules JSON file or a CSV/TSV feature matrix."""
+    """Validate a JSON rules file or a CSV/TSV alphabet file."""
     if input_path.suffix.lower() == ".json":
-        if output is not None:
-            raise typer.BadParameter(
-                "Output is only supported for CSV/TSV feature tables."
-            )
         _validate_rules_file(input_path, alphabet)
     else:
-        output_json = _table_to_json(input_path, delimiter)
-        if output:
-            output.write_text(output_json + "\n", encoding="utf-8")
+        _table_to_json(input_path, delimiter)
 
     if not quiet:
         typer.echo("OK")
