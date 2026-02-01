@@ -343,7 +343,11 @@ def compile_rule(
         help="Write a compiled OpenFst binary to this path.",
     ),
 ) -> None:
-    """Compile a single rule into AT&T text format (always writes .att and .sym)."""
+    """Compile a single rule into AT&T text format (always writes .att and .sym).
+
+    The compiled machine is canonical LEFT; RIGHT direction is handled by
+    reversing input/output at evaluation time.
+    """
     payload = _load_json(rules_path)
     try:
         rules = RulesFile.model_validate(payload).rules
