@@ -477,6 +477,78 @@ def eval_rule(
     )
 
 
+@app.command("generate")
+def generate_samples(
+    output_dir: Path = typer.Argument(
+        ...,
+        dir_okay=True,
+        writable=True,
+        help="Directory to write sample alphabet, rules, and input files.",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        "-f",
+        help="Overwrite existing sample files.",
+    ),
+) -> None:
+    """Generate sample alphabet.csv, rules.json, and input.json files."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    alphabet_path = output_dir / "alphabet.csv"
+    rules_path = output_dir / "rules.json"
+    input_path = output_dir / "input.json"
+
+    if not force:
+        existing = [
+            path.name
+            for path in (alphabet_path, rules_path, input_path)
+            if path.exists()
+        ]
+        if existing:
+            raise typer.BadParameter(
+                "Sample files already exist: " + ", ".join(existing)
+            )
+
+    alphabet_path.write_text(
+        ",a,b,c,d\n"
+        "Voice,+,-,0,-\n"
+        "Consonantal,0,+,-,0\n",
+        encoding="utf-8",
+    )
+    rules_payload = {
+        "rules": [
+            {
+                "id": "spread_voice_right",
+                "dir": "RIGHT",
+                "inr": [["+","Voice"]],
+                "trm": [["+","Consonantal"]],
+                "cnd": [],
+                "out": "(proj TRM (Voice))",
+            }
+        ]
+    }
+    rules_path.write_text(
+        "{\n"
+        '  "rules": [\n'
+        "    {\n"
+        '      "id": "spread_voice_right",\n'
+        '      "dir": "RIGHT",\n'
+        '      "inr": [["+","Voice"]],\n'
+        '      "trm": [["+","Consonantal"]],\n'
+        '      "cnd": [],\n'
+        '      "out": "(proj TRM (Voice))"\n'
+        "    }\n"
+        "  ]\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    input_path.write_text(
+        '[\n  ["a","b","c","a"]\n]\n',
+        encoding="utf-8",
+    )
+
+
 def _compile_fst(att_path: Path, fst_path: Path) -> None:
     if shutil.which("fstcompile") is None:
         raise typer.BadParameter(
