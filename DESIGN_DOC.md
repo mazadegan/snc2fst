@@ -83,6 +83,23 @@ Rules are represented as **pure data objects** in JSON. Each rule has the follow
 }
 ```
 
+A rules file will look like this:
+
+```json
+{
+  "rules": [
+    {
+        "id": "spread_voice_right",
+        "dir": "RIGHT",
+        "inr": [["+", "Voice"]],
+        "trm": [["+", "Consonantal"]],
+        "cnd": [],
+        "out": "(unify (subtract TRM (proj TRM (Voice))) (proj INR (Voice)))"
+    }
+  ]
+}
+```
+
 ### 4.1 Natural classes (`inr`, `trm`, `cnd`)
 
 * Represented as **lists of valued feature tuples**: `[polarity, feature]`
