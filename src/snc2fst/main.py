@@ -135,6 +135,18 @@ def _load_alphabet_features(alphabet_path: Path) -> set[str]:
     return set(alphabet.feature_schema.features)
 
 
+def _load_alphabet(alphabet_path: Path) -> Alphabet:
+    if alphabet_path.suffix.lower() not in {".csv", ".tsv", ".tab"}:
+        raise typer.BadParameter(
+            "Alphabet must be a CSV/TSV feature table."
+        )
+    payload = json.loads(_table_to_json(alphabet_path, delimiter=None))
+    try:
+        return Alphabet.model_validate(payload)
+    except ValidationError as exc:
+        raise typer.BadParameter(format_validation_error(exc)) from exc
+
+
 def _bundle_from_rule(rule: Rule, label: str) -> dict[str, str]:
     bundle: dict[str, str] = {}
     for polarity, feature in getattr(rule, label):
@@ -316,6 +328,153 @@ def compile_rule(
     write_att(machine, str(output), symtab_path=str(symtab_path))
     if fst is not None:
         _compile_fst(output, fst)
+
+
+@app.command("eval")
+def eval_rule(
+    rules_path: Path = typer.Argument(
+        ...,
+        exists=True,
+        dir_okay=False,
+        readable=True,
+        help="Rules JSON file to evaluate.",
+    ),
+    input_path: Path = typer.Argument(
+        ...,
+        exists=True,
+        dir_okay=False,
+        readable=True,
+        help="Input JSON array of words (each word is an array of symbols).",
+    ),
+    output: Path = typer.Argument(
+        ...,
+        dir_okay=False,
+        writable=True,
+        help="Output JSON file for evaluated words.",
+    ),
+    rule_id: str | None = typer.Option(
+        None,
+        "--rule-id",
+        help="Rule id to evaluate (required if multiple rules).",
+    ),
+    alphabet: Path | None = typer.Option(
+        None,
+        "--alphabet",
+        "-a",
+        dir_okay=False,
+        readable=True,
+        help="Alphabet CSV/TSV file used to map symbols to bundles.",
+    ),
+    include_input: bool = typer.Option(
+        False,
+        "--include-input",
+        help="Include both input and output words in the result.",
+    ),
+    strict: bool = typer.Option(
+        False,
+        "--strict",
+        help="Fail if an output bundle has no matching symbol.",
+    ),
+) -> None:
+    """Evaluate a rule against an input word list."""
+    payload = _load_json(rules_path)
+    try:
+        rules = RulesFile.model_validate(payload).rules
+    except ValidationError as exc:
+        raise typer.BadParameter(format_validation_error(exc)) from exc
+
+    if alphabet is None:
+        raise typer.BadParameter(
+            "Evaluation requires an alphabet; pass --alphabet."
+        )
+    alphabet_data = _load_alphabet(alphabet)
+    features = set(alphabet_data.feature_schema.features)
+    for rule in rules:
+        _validate_rule_features(rule, features, "inr")
+        _validate_rule_features(rule, features, "trm")
+        _validate_rule_features(rule, features, "cnd")
+        try:
+            evaluate_out_dsl(
+                rule.out,
+                inr=_bundle_from_rule(rule, "inr"),
+                trm=_bundle_from_rule(rule, "trm"),
+                features=features,
+            )
+        except OutDslError as exc:
+            raise typer.BadParameter(
+                f"Rule {rule.id} out is invalid: {exc}"
+            ) from exc
+
+    rule = _select_rule(rules, rule_id)
+    try:
+        segments = json.loads(input_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise typer.BadParameter(
+            f"Invalid JSON: {exc.msg} (line {exc.lineno}, column {exc.colno})"
+        ) from exc
+    if not isinstance(segments, list):
+        raise typer.BadParameter(
+            "Input JSON must be an array of words (arrays of symbols)."
+        )
+
+    symbol_to_bundle: dict[str, dict[str, str]] = {}
+    bundle_to_symbol: dict[tuple[str, ...], str] = {}
+    feature_order = tuple(alphabet_data.feature_schema.features)
+    for row in alphabet_data.rows:
+        symbol_to_bundle[row.symbol] = dict(row.features)
+        bundle_key = tuple(row.features[feature] for feature in feature_order)
+        if bundle_key in bundle_to_symbol:
+            raise typer.BadParameter(
+                f"Alphabet has multiple symbols for bundle: {bundle_key}"
+            )
+        bundle_to_symbol[bundle_key] = row.symbol
+
+    from .evaluator import evaluate_rule_on_bundles
+
+    output_words: list[list[str]] = []
+    results_with_input: list[dict[str, list[str]]] = []
+
+    for idx, word in enumerate(segments):
+        if not isinstance(word, list):
+            raise typer.BadParameter(
+                f"Word at index {idx} is not an array of symbols."
+            )
+        bundles: list[dict[str, str]] = []
+        for sym in word:
+            if not isinstance(sym, str) or not sym.strip():
+                raise typer.BadParameter(
+                    f"Word {idx} contains a non-string symbol."
+                )
+            if sym not in symbol_to_bundle:
+                raise typer.BadParameter(
+                    f"Word {idx} has unknown symbol: {sym!r}"
+                )
+            bundles.append(symbol_to_bundle[sym])
+
+        evaluated = evaluate_rule_on_bundles(rule, bundles)
+        output_syms: list[object] = []
+        for bundle in evaluated:
+            bundle_key = tuple(
+                bundle.get(feature, "0") for feature in feature_order
+            )
+            if bundle_key not in bundle_to_symbol:
+                if strict:
+                    raise typer.BadParameter(
+                        f"Output bundle has no symbol: {bundle_key}"
+                    )
+                output_syms.append(bundle)
+            else:
+                output_syms.append(bundle_to_symbol[bundle_key])
+
+        output_words.append(output_syms)
+        if include_input:
+            results_with_input.append({"input": word, "output": output_syms})
+
+    payload_out = results_with_input if include_input else output_words
+    output.write_text(
+        json.dumps(payload_out, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
 
 
 def _compile_fst(att_path: Path, fst_path: Path) -> None:
