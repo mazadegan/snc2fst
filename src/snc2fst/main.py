@@ -198,6 +198,36 @@ def _validate_rules_file(
             ) from exc
 
 
+def _validate_input_words(
+    input_path: Path, alphabet_path: Path | None
+) -> None:
+    if alphabet_path is None:
+        raise typer.BadParameter(
+            "Input validation requires an alphabet file; pass --alphabet."
+        )
+    alphabet_data = _load_alphabet(alphabet_path)
+    symbols = {row.symbol for row in alphabet_data.rows}
+    payload = _load_json(input_path)
+    if not isinstance(payload, list):
+        raise typer.BadParameter(
+            "Input JSON must be an array of words (arrays of symbols)."
+        )
+    for idx, word in enumerate(payload):
+        if not isinstance(word, list):
+            raise typer.BadParameter(
+                f"Word at index {idx} is not an array of symbols."
+            )
+        for sym in word:
+            if not isinstance(sym, str) or not sym.strip():
+                raise typer.BadParameter(
+                    f"Word {idx} contains a non-string symbol."
+                )
+            if sym not in symbols:
+                raise typer.BadParameter(
+                    f"Word {idx} has unknown symbol: {sym!r}"
+                )
+
+
 def _select_rule(rules: list[Rule], rule_id: str | None) -> Rule:
     if rule_id is None:
         if len(rules) == 1:
@@ -220,6 +250,12 @@ def validate(
         readable=True,
         help="Rules JSON or alphabet CSV/TSV file to validate.",
     ),
+    kind: str | None = typer.Option(
+        None,
+        "--kind",
+        "-k",
+        help="Validation kind: rules, alphabet, or input (auto-detect if omitted).",
+    ),
     alphabet: Path | None = typer.Option(
         None,
         "--alphabet",
@@ -241,11 +277,24 @@ def validate(
         help="Suppress success output.",
     ),
 ) -> None:
-    """Validate a JSON rules file or a CSV/TSV alphabet file."""
-    if input_path.suffix.lower() == ".json":
+    """Validate a rules JSON, alphabet CSV/TSV, or input words JSON."""
+    kind_value = kind.lower() if kind else None
+    if kind_value is None:
+        if input_path.suffix.lower() == ".json":
+            kind_value = "rules"
+        else:
+            kind_value = "alphabet"
+
+    if kind_value == "rules":
         _validate_rules_file(input_path, alphabet)
-    else:
+    elif kind_value == "alphabet":
         _table_to_json(input_path, delimiter)
+    elif kind_value == "input":
+        _validate_input_words(input_path, alphabet)
+    else:
+        raise typer.BadParameter(
+            "Invalid --kind. Use 'rules', 'alphabet', or 'input'."
+        )
 
     if not quiet:
         typer.echo("OK")

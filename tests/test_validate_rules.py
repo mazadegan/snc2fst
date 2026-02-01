@@ -39,6 +39,31 @@ def test_validate_rules_json(tmp_path: Path) -> None:
     assert result.output.strip() == "OK"
 
 
+def test_validate_input_words(tmp_path: Path) -> None:
+    alphabet_content = ",a,b\nVoice,0,0\n"
+    alphabet_path = tmp_path / "alphabet.csv"
+    alphabet_path.write_text(alphabet_content, encoding="utf-8")
+
+    payload = [["a", "b"], ["b"]]
+    input_path = tmp_path / "input.json"
+    input_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "validate",
+            str(input_path),
+            "--kind",
+            "input",
+            "--alphabet",
+            str(alphabet_path),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert result.output.strip() == "OK"
+
+
 def test_validate_rules_unknown_out_feature(tmp_path: Path) -> None:
     alphabet_content = ",a\nVoice,0\n"
     alphabet_path = tmp_path / "alphabet.csv"
