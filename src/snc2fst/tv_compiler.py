@@ -98,6 +98,28 @@ def write_att(
         _write_symtab(machine, symtab_path)
 
 
+def run_tv_machine(
+    machine: TvMachine, inputs: list[BundleTuple]
+) -> list[BundleTuple]:
+    transitions: dict[tuple[int, int], tuple[int, int]] = {}
+    for src, ilabel, olabel, dst in machine.arcs:
+        transitions[(src, ilabel)] = (dst, olabel)
+
+    state = machine.start_state
+    outputs: list[BundleTuple] = []
+    for bundle in inputs:
+        ilabel = _encode_label(bundle)
+        key = (state, ilabel)
+        if key not in transitions:
+            raise ValueError(
+                f"Missing transition for state {state} label {ilabel}."
+            )
+        next_state, olabel = transitions[key]
+        outputs.append(_decode_label(olabel, len(machine.v_order)))
+        state = next_state
+    return outputs
+
+
 def _enumerate_sigma(size: int) -> list[BundleTuple]:
     return [tuple(values) for values in product((0, 1, 2), repeat=size)]
 
@@ -109,6 +131,17 @@ def _encode_label(bundle: BundleTuple) -> int:
         label += value * base
         base *= 3
     return label
+
+
+def _decode_label(label: int, size: int) -> BundleTuple:
+    if label <= 0:
+        raise ValueError(f"Invalid label: {label}")
+    value = label - 1
+    digits: list[int] = []
+    for _ in range(size):
+        digits.append(value % 3)
+        value //= 3
+    return tuple(digits)
 
 
 def _project_tuple(bundle: BundleTuple, indices: tuple[int, ...]) -> BundleTuple:

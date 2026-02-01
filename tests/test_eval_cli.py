@@ -103,7 +103,7 @@ def test_eval_cli_non_strict_emits_bundle(tmp_path: Path) -> None:
     assert output == [[{"Voice": "-"}, "b", "c"]]
 
 
-def test_eval_cli_compare_requires_fst(tmp_path: Path) -> None:
+def test_eval_cli_compare_requires_backend(tmp_path: Path) -> None:
     rules = {
         "rules": [
             {
@@ -146,4 +146,4 @@ def test_eval_cli_compare_requires_fst(tmp_path: Path) -> None:
         ],
     )
     assert result.exit_code != 0
-    assert "--fst" in result.output
+    assert "--fst" in result.output or "--tv" in result.output
