@@ -459,7 +459,11 @@ def eval_rule(
         help="Fail if an output bundle has no matching symbol in the alphabet.",
     ),
 ) -> None:
-    """Evaluate a rule against an input word list."""
+    """Evaluate a rule against an input word list.
+
+    The compiled machine is canonical LEFT; RIGHT rules are evaluated by
+    reversing input/output around the machine.
+    """
     payload = _load_json(rules_path)
     try:
         rules = RulesFile.model_validate(payload).rules
