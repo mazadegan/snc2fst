@@ -13,3 +13,6 @@ wheels/
 *.csv
 *.tsv
 *.json
+*.att
+*.fst
+*.sym

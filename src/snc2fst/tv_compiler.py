@@ -85,6 +85,19 @@ def compile_tv(rule: Rule) -> TvMachine:
     )
 
 
+def write_att(
+    machine: TvMachine, output_path: str, *, symtab_path: str | None = None
+) -> None:
+    with open(output_path, "w", encoding="utf-8") as handle:
+        for src, ilabel, olabel, dst in machine.arcs:
+            handle.write(f"{src} {dst} {ilabel} {olabel} 0\n")
+        for state in sorted(machine.final_states):
+            handle.write(f"{state} 0\n")
+
+    if symtab_path is not None:
+        _write_symtab(machine, symtab_path)
+
+
 def _enumerate_sigma(size: int) -> list[BundleTuple]:
     return [tuple(values) for values in product((0, 1, 2), repeat=size)]
 
@@ -148,3 +161,27 @@ def _compile_class_predicate(
         return all(bundle[idx] == value for idx, value in requirements)
 
     return _predicate
+
+
+def _write_symtab(machine: TvMachine, path: str) -> None:
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write("<eps> 0\n")
+        for bundle in _enumerate_sigma(len(machine.v_order)):
+            label = _encode_label(bundle)
+            symbol = _symbol_for_bundle(bundle, machine.v_order)
+            handle.write(f"{symbol} {label}\n")
+
+
+def _symbol_for_bundle(
+    bundle: BundleTuple, features: tuple[str, ...]
+) -> str:
+    parts: list[str] = []
+    for feature, value in zip(features, bundle):
+        if value == 1:
+            suffix = "+"
+        elif value == 2:
+            suffix = "-"
+        else:
+            suffix = "0"
+        parts.append(f"{feature}{suffix}")
+    return "_".join(parts)

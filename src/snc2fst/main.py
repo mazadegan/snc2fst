@@ -11,6 +11,7 @@ from ._version import __version__
 from .alphabet import Alphabet, format_validation_error
 from .out_dsl import OutDslError, evaluate_out_dsl
 from .rules import RulesFile, Rule
+from .tv_compiler import compile_tv, write_att
 
 app = typer.Typer(add_completion=False)
 
@@ -182,6 +183,19 @@ def _validate_rules_file(
             ) from exc
 
 
+def _select_rule(rules: list[Rule], rule_id: str | None) -> Rule:
+    if rule_id is None:
+        if len(rules) == 1:
+            return rules[0]
+        raise typer.BadParameter(
+            "Rules file contains multiple rules; pass --rule-id."
+        )
+    for rule in rules:
+        if rule.id == rule_id:
+            return rule
+    raise typer.BadParameter(f"Unknown rule id: {rule_id!r}")
+
+
 @app.command("validate")
 def validate(
     input_path: Path = typer.Argument(
@@ -203,6 +217,51 @@ def validate(
 
     if not quiet:
         typer.echo("OK")
+
+
+@app.command("compile")
+def compile_rule(
+    rules_path: Path = typer.Argument(
+        ..., exists=True, dir_okay=False, readable=True
+    ),
+    output: Path = typer.Argument(..., dir_okay=False, writable=True),
+    rule_id: str | None = typer.Option(None, "--rule-id"),
+    alphabet: Path | None = typer.Option(
+        None, "--alphabet", "-a", dir_okay=False, readable=True
+    ),
+    symtab: Path | None = typer.Option(
+        None, "--symtab", dir_okay=False, writable=True
+    ),
+) -> None:
+    """Compile a single rule into AT&T text format."""
+    payload = _load_json(rules_path)
+    try:
+        rules = RulesFile.model_validate(payload).rules
+    except ValidationError as exc:
+        raise typer.BadParameter(format_validation_error(exc)) from exc
+
+    if alphabet is not None:
+        features = _load_alphabet_features(alphabet)
+        for rule in rules:
+            _validate_rule_features(rule, features, "inr")
+            _validate_rule_features(rule, features, "trm")
+            _validate_rule_features(rule, features, "cnd")
+            try:
+                evaluate_out_dsl(
+                    rule.out,
+                    inr=_bundle_from_rule(rule, "inr"),
+                    trm=_bundle_from_rule(rule, "trm"),
+                    features=features,
+                )
+            except OutDslError as exc:
+                raise typer.BadParameter(
+                    f"Rule {rule.id} out is invalid: {exc}"
+                ) from exc
+
+    rule = _select_rule(rules, rule_id)
+    machine = compile_tv(rule)
+    symtab_path = symtab or output.with_suffix(".sym")
+    write_att(machine, str(output), symtab_path=str(symtab_path))
 
 
 def main() -> None:
