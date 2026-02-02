@@ -375,6 +375,17 @@ def compile_rule(
         writable=True,
         help="Write a compiled OpenFst binary to this path.",
     ),
+    max_arcs: int = typer.Option(
+        5_000_000,
+        "--max-arcs",
+        min=1,
+        help="Maximum allowed arcs before aborting compilation.",
+    ),
+    progress: bool = typer.Option(
+        False,
+        "--progress",
+        help="Show a progress bar during compilation.",
+    ),
 ) -> None:
     """Compile a single rule into AT&T text format (always writes .att and .sym).
 
@@ -406,7 +417,10 @@ def compile_rule(
                 ) from exc
 
     rule = _select_rule(rules, rule_id)
-    machine = compile_tv(rule)
+    _enforce_arc_limit(rule, max_arcs)
+    machine = compile_tv(rule, show_progress=progress)
+    if progress:
+        typer.echo("writing output...")
 
     if symtab is not None:
         symtab_path = symtab
@@ -415,6 +429,17 @@ def compile_rule(
     write_att(machine, str(output), symtab_path=str(symtab_path))
     if fst is not None:
         _compile_fst(output, fst)
+    arc_count = len(machine.arcs)
+    state_count = len(machine.final_states)
+    symtab_display = symtab_path
+    fst_display = fst if fst is not None else None
+    typer.echo(
+        f"done. states={state_count} arcs={arc_count}"
+    )
+    typer.echo(f"att: {output}")
+    typer.echo(f"symtab: {symtab_display}")
+    if fst_display is not None:
+        typer.echo(f"fst: {fst_display}")
 
 
 @app.command("eval")
@@ -823,6 +848,19 @@ def _format_word_inline(word: list[object]) -> str:
                 json.dumps(item, ensure_ascii=False, separators=(",", ":"))
             )
     return f'[{",".join(rendered_items)}]'
+
+
+def _enforce_arc_limit(rule: Rule, max_arcs: int) -> None:
+    from .feature_analysis import compute_p_features, compute_v_features
+
+    v_size = len(compute_v_features(rule))
+    p_size = len(compute_p_features(rule))
+    arc_count = (1 + (3 ** p_size)) * (3 ** v_size)
+    if arc_count > max_arcs:
+        raise typer.BadParameter(
+            "Estimated arcs exceed --max-arcs: "
+            f"{arc_count} > {max_arcs} (|V|={v_size}, |P|={p_size})"
+        )
 
 
 def _diff_word_lists(

@@ -38,3 +38,28 @@ def test_compile_writes_att_and_symtab(tmp_path: Path) -> None:
     assert output_path.read_text(encoding="utf-8").strip()
     assert symtab_path.read_text(encoding="utf-8").strip()
 
+
+def test_compile_respects_max_arcs(tmp_path: Path) -> None:
+    rules = {
+        "rules": [
+            {
+                "id": "spread_voice_right",
+                "dir": "RIGHT",
+                "inr": [["+","Voice"]],
+                "trm": [["+","Consonantal"]],
+                "cnd": [],
+                "out": "(proj TRM (Voice))",
+            }
+        ]
+    }
+    rules_path = tmp_path / "rules.json"
+    rules_path.write_text(json.dumps(rules), encoding="utf-8")
+
+    output_path = tmp_path / "tv.att"
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        ["compile", str(rules_path), str(output_path), "--max-arcs", "1"],
+    )
+    assert result.exit_code != 0
+    assert "--max-arcs" in result.output

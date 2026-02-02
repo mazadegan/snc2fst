@@ -20,7 +20,7 @@ class TvMachine:
     arcs: list[tuple[int, int, int, int]]
 
 
-def compile_tv(rule: Rule) -> TvMachine:
+def compile_tv(rule: Rule, *, show_progress: bool = False) -> TvMachine:
     v_features = compute_v_features(rule)
     p_features = compute_p_features(rule)
     v_order = tuple(sorted(v_features))
@@ -52,9 +52,20 @@ def compile_tv(rule: Rule) -> TvMachine:
         )
         return _tuple_from_bundle(out_bundle, v_order)
 
-    for state_id, trm_p in [(q_false, None)] + [
+    states = [(q_false, None)] + [
         (state_id, trm_p) for trm_p, state_id in trm_state.items()
-    ]:
+    ]
+    total_arcs = len(states) * len(sigma_v)
+    pbar = None
+    if show_progress and total_arcs:
+        try:
+            from tqdm import tqdm
+        except ImportError:  # pragma: no cover - dependency missing
+            pbar = None
+        else:
+            pbar = tqdm(total=total_arcs, desc="arcs (total)")
+
+    for state_id, trm_p in states:
         for x_v in sigma_v:
             ilabel = _encode_label(x_v)
             if state_id == q_false:
@@ -74,6 +85,11 @@ def compile_tv(rule: Rule) -> TvMachine:
                 out_tuple = emit(x_v, trm_p)
             olabel = _encode_label(out_tuple)
             arcs.append((state_id, ilabel, olabel, next_state))
+        if pbar is not None:
+            pbar.update(len(sigma_v))
+
+    if pbar is not None:
+        pbar.close()
 
     final_states = set(range(1 + len(sigma_p)))
     return TvMachine(
