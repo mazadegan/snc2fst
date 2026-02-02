@@ -1,6 +1,243 @@
+# snc2fst
+
+`snc2fst` compiles Search & Change rules into FSTs over a
+ternary-feature alphabet and provides CLI tools for validation, compilation,
+and evaluation.
+
+This project builds the canonicalized/merged transducer (T_V) directly,
+instead of constructing a brute-force transducer and then merging. The direct
+construction is faster, smaller, and matches the design assumption that the
+grammar-visible feature set `V` is small (typically 2–8).
+
+## Why build T_V directly?
+
+S&C rules only depend on a small subset of features `V` and on an even smaller
+subset `P` of TRM features that the `out` expression can observe. By building
+the merged state space indexed by `Σ_P` and emitting only arcs over `Σ_V`,
+we avoid the combinatoric explosion of a brute-force transducer that would later be
+collapsed by canonicalization/merging. Doing this, we get:
+
+- fewer states (1 + 3^|P| instead of 1 + 3^|F|),
+- fewer arcs ((1 + 3^|P|) * 3^|V|),
+
 ## Direction handling
 
-The compiler emits a single canonical **LEFT** transducer. For **RIGHT** rules,
+The compiler emits a single canonical **LEFT** machine. For **RIGHT** rules,
 `snc2fst eval` applies the standard reversal wrapper (reverse input, run the
 machine, then reverse output). This keeps compilation consistent while still
-supporting both directions at runtime.
+allowing both directions at runtime.
+
+## Feature encoding
+
+Features are ternary:
+
+- `0` = unspecified
+- `+` = plus
+- `-` = minus
+
+A bundle over `V` is a tuple of ternary values in a fixed `V` order. Labels are
+encoded in base‑3 with label 0 reserved for epsilon.
+
+## Alphabet format
+
+Alphabet files are CSV/TSV feature tables:
+
+- first row: empty leading cell, then symbol names
+- first column: feature names
+- cells: `+`, `-`, or `0` (unspecified)
+
+Example:
+
+```csv
+,a,b,c
+Voice,+,-,0
+Consonantal,0,+,-
+```
+
+## CLI quickstart
+
+### Generate sample files
+
+```
+snc2fst generate samples/
+```
+
+## Example rules.json
+
+```json
+{
+  "rules": [
+    {
+      "id": "spread_voice_right",
+      "dir": "RIGHT",
+      "inr": [["+","Voice"]],
+      "trm": [["+","Consonantal"]],
+      "cnd": [],
+      "out": "(unify INR (proj TRM (Voice)))"
+    }
+  ]
+}
+```
+
+### Out DSL
+
+The `out` field is a tiny DSL that composes feature bundles from `INR` and `TRM`
+using `lit`, `proj`, `unify`, and `subtract`. It exists so rules can describe
+the Out function declaratively without having to evaluate user-generated Python 
+or having a huge JSON schema that’s horrifying to look at.
+
+Examples:
+
+```
+(proj TRM (Voice))
+(unify (subtract TRM (proj TRM (Voice))) (proj INR (Voice)))
+(lit - Voice)
+```
+
+### Validate files
+
+Rules validation requires an alphabet:
+
+```
+snc2fst validate samples/rules.json --alphabet samples/alphabet.csv
+```
+
+Validation type is inferred from the input file, but you can be explicit with
+`--kind` (rules, alphabet, or input).
+
+Validate input words:
+
+```
+snc2fst validate samples/input.json --kind input --alphabet samples/alphabet.csv
+```
+
+### Compile a rule to AT&T + symtab
+
+```
+snc2fst compile samples/rules.json samples/tv.att --alphabet samples/alphabet.csv
+```
+
+Compile and also emit a binary FST (requires OpenFst tools on PATH):
+
+```
+snc2fst compile samples/rules.json samples/tv.att --alphabet samples/alphabet.csv --fst samples/tv.fst
+```
+
+Show progress bar when generating large FSTs:
+
+```
+snc2fst compile samples/rules.json /tmp/tv.att --alphabet samples/alphabet.csv --progress
+```
+
+Guard against accidental blow‑ups (default --max-arcs is 5 million):
+
+```
+snc2fst compile samples/rules.json /tmp/tv.att --alphabet samples/alphabet.csv --max-arcs 1000000
+```
+
+### Evaluate input words
+
+Input format is JSON: a list of words, each word is a list of segment symbols
+from the alphabet.
+
+Example `input.json`:
+
+```json
+[
+  ["a","b","c","a"]
+]
+```
+
+Example `output.json` (default):
+
+```json
+[
+  ["d","b","c","a"]
+]
+```
+
+Example with `--include-input`:
+
+```json
+[
+  {"input": ["a","b","c","a"], "output": ["d","b","c","a"]}
+]
+```
+
+```
+snc2fst eval samples/rules.json samples/input.json samples/out.json --alphabet samples/alphabet.csv
+```
+
+Include input + output in the result:
+
+```
+snc2fst eval samples/rules.json samples/input.json samples/out.json --alphabet samples/alphabet.csv --include-input
+```
+
+Strict symbol mapping (error if output bundle has no symbol):
+
+```
+snc2fst eval samples/rules.json samples/input.json samples/out.json --alphabet samples/alphabet.csv --strict
+```
+
+Use the in‑memory TvMachine backend and compare to the reference evaluator:
+
+```
+snc2fst eval samples/rules.json samples/input.json samples/out.json --alphabet samples/alphabet.csv --tv --compare
+```
+
+Use a compiled OpenFst binary for evaluation:
+
+```
+snc2fst eval samples/rules.json samples/input.json samples/out.json \
+  --alphabet samples/alphabet.csv \
+  --fst samples/tv.fst
+```
+
+Compare all backends (requires both `--tv` and `--fst`):
+
+```
+snc2fst eval samples/rules.json samples/input.json samples/out.json \
+  --alphabet samples/alphabet.csv \
+  --tv --fst samples/tv.fst --compare-all
+```
+
+### Inspect V and P
+
+Print the feature sets used to build the machine:
+
+```
+snc2fst eval samples/rules.json samples/input.json samples/out.json --alphabet samples/alphabet.csv --dump-vp
+snc2fst validate samples/rules.json --alphabet samples/alphabet.csv --dump-vp
+```
+
+## OpenFst tools
+
+To print with symbols:
+
+```
+fstprint --isymbols=samples/tv.sym --osymbols=samples/tv.sym samples/tv.fst
+```
+
+## Backends
+
+`eval` can run three backends:
+
+- **reference** (default): direct S&C interpreter
+- **TvMachine** (`--tv`): in‑memory machine
+- **OpenFst** (`--fst`): compiled binary FST
+
+Use `--compare` or `--compare-all` to cross‑check outputs.
+
+## Performance tips
+
+- Keep `|V|` and `|P|` small; arc count scales as `(1 + 3^|P|) * 3^|V|`.
+- Use `--max-arcs` to prevent accidental blow‑ups.
+- If you hit the arc limit, reduce features or raise the arc limit.
+
+## Troubleshooting
+
+- **"Evaluation requires an alphabet"** → pass `--alphabet`.
+- **"Unknown symbol"** → input contains symbols not in the alphabet.
+- **"--max-arcs exceeded"** → reduce features or raise `--max-arcs`.
+- **"OpenFst tools not found"** → install OpenFst CLI tools or omit `--fst`.
