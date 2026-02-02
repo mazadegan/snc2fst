@@ -228,6 +228,38 @@ To print with symbols:
 fstprint --isymbols=samples/tv.sym --osymbols=samples/tv.sym samples/tv.fst
 ```
 
+## Testing
+
+Run the full test suite (stress tests excluded by default):
+
+```
+uv run pytest
+```
+
+Include stress tests:
+
+```
+uv run pytest --stress-test
+```
+
+Show the stress-test progress bar (pytest captures output unless `-s` is used):
+
+```
+uv run pytest --stress-test -s
+```
+
+Tune stress-test sizes:
+
+```
+uv run pytest --stress-test \
+  --stress-rules 50 \
+  --stress-words 400 \
+  --stress-max-len 20 \
+  --stress-fst-rules 10 \
+  --stress-fst-words 80 \
+  --stress-fst-max-len 15
+```
+
 ## Backends
 
 `eval` can run three backends:
