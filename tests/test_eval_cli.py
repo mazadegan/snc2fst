@@ -1,7 +1,11 @@
 import json
+import random
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 # Allow tests to run without installing the package.
@@ -107,8 +111,8 @@ def test_eval_cli_compare_requires_backend(tmp_path: Path) -> None:
     rules = {
         "rules": [
             {
-                "id": "spread_voice_right",
-                "dir": "RIGHT",
+                "id": "spread_voice_left",
+                "dir": "LEFT",
                 "inr": [["+","Voice"]],
                 "trm": [["+","Consonantal"]],
                 "cnd": [],
@@ -240,3 +244,83 @@ def test_eval_cli_dump_vp(tmp_path: Path) -> None:
     assert result.exit_code == 0, result.output
     assert "V:" in result.output
     assert "P:" in result.output
+
+
+@pytest.mark.skipif(
+    shutil.which("fstcompile") is None
+    or shutil.which("fstcompose") is None
+    or shutil.which("fstshortestpath") is None
+    or shutil.which("fstprint") is None,
+    reason="OpenFst tools not available",
+)
+def test_eval_cli_compare_all_backends(tmp_path: Path) -> None:
+    random.seed(0)
+    rules = {
+        "rules": [
+            {
+                "id": "spread_voice_right",
+                "dir": "RIGHT",
+                "inr": [["+","Voice"]],
+                "trm": [["+","Consonantal"]],
+                "cnd": [],
+                "out": "(proj TRM (Voice))",
+            }
+        ]
+    }
+    rules_path = tmp_path / "rules.json"
+    rules_path.write_text(json.dumps(rules), encoding="utf-8")
+
+    alphabet_path = tmp_path / "alphabet.csv"
+    alphabet_path.write_text(
+        ",a,b,c,d\nVoice,+,-,0,-\nConsonantal,0,+,-,0\n",
+        encoding="utf-8",
+    )
+
+    symbols = ["a", "b", "c", "d"]
+    input_segments = [
+        [random.choice(symbols) for _ in range(5)]
+        for _ in range(5)
+    ]
+    input_path = tmp_path / "input.json"
+    input_path.write_text(json.dumps(input_segments), encoding="utf-8")
+
+    att_path = tmp_path / "tv.att"
+    fst_path = tmp_path / "tv.fst"
+
+    runner = CliRunner()
+    compile_result = runner.invoke(
+        app,
+        [
+            "compile",
+            str(rules_path),
+            str(att_path),
+            "--alphabet",
+            str(alphabet_path),
+        ],
+    )
+    assert compile_result.exit_code == 0, compile_result.output
+
+    fstcompile = subprocess.run(
+        ["fstcompile", str(att_path), str(fst_path)],
+        capture_output=True,
+        text=True,
+    )
+    assert fstcompile.returncode == 0, fstcompile.stderr
+
+    output_path = tmp_path / "output.json"
+    eval_result = runner.invoke(
+        app,
+        [
+            "eval",
+            str(rules_path),
+            str(input_path),
+            str(output_path),
+            "--alphabet",
+            str(alphabet_path),
+            "--fst",
+            str(fst_path),
+            "--tv",
+            "--compare-all",
+        ],
+    )
+    assert eval_result.exit_code == 0, eval_result.output

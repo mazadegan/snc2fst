@@ -596,9 +596,9 @@ def eval_rule(
                 strict=strict,
             )
             diffs = (
-                _diff_word_lists(ref_words, tv_words)
-                + _diff_word_lists(ref_words, fst_words)
-                + _diff_word_lists(tv_words, fst_words)
+                _label_diffs("ref vs tv", _diff_word_lists(ref_words, tv_words))
+                + _label_diffs("ref vs fst", _diff_word_lists(ref_words, fst_words))
+                + _label_diffs("tv vs fst", _diff_word_lists(tv_words, fst_words))
             )
             if diffs:
                 message = "Output mismatch:\n" + "\n".join(diffs)
@@ -846,6 +846,10 @@ def _diff_word_lists(
             f"word count mismatch: expected={len(expected)} actual={len(actual)}"
         )
     return diffs
+
+
+def _label_diffs(label: str, diffs: list[str]) -> list[str]:
+    return [f"{label}: {diff}" for diff in diffs]
 
 
 def _evaluate_with_reference(
@@ -1162,18 +1166,38 @@ def _render_input_att(symbols: list[str]) -> str:
 
 
 def _parse_fstprint_output(text: str) -> list[str]:
-    arcs: list[tuple[int, str]] = []
+    arcs: dict[int, tuple[int, str]] = {}
+    src_states: set[int] = set()
+    dst_states: set[int] = set()
     for line in text.splitlines():
         parts = line.split()
         if len(parts) < 4:
             continue
         src = int(parts[0])
+        dst = int(parts[1])
         olabel = parts[3]
         if olabel == "<eps>":
-            continue
-        arcs.append((src, olabel))
-    arcs.sort(key=lambda item: item[0])
-    return [olabel for _, olabel in arcs]
+            olabel = ""
+        if src in arcs:
+            raise typer.BadParameter(
+                "Non-deterministic output path in fstprint output."
+            )
+        arcs[src] = (dst, olabel)
+        src_states.add(src)
+        dst_states.add(dst)
+
+    output: list[str] = []
+    start_candidates = src_states - dst_states
+    if len(start_candidates) == 1:
+        state = next(iter(start_candidates))
+    else:
+        state = 0
+    while state in arcs:
+        next_state, olabel = arcs[state]
+        if olabel:
+            output.append(olabel)
+        state = next_state
+    return output
 
 
 class _Symtab:
