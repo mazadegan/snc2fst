@@ -59,6 +59,11 @@ def extract_trm_dependent_features(text: str) -> set[str]:
     return _collect_trm_dependent_features(ast)
 
 
+def out_uses_full_trm(text: str) -> bool:
+    ast = parse_out_dsl(text)
+    return _has_unprojected_trm(ast, projected=False)
+
+
 def _validate_bundle(bundle: FeatureBundle) -> FeatureBundle:
     for feature, polarity in bundle.items():
         if polarity not in {"+", "-"}:
@@ -267,6 +272,37 @@ def _has_trm(node: OutDslAst) -> bool:
         if len(node) != 3:
             raise OutDslError(f"{op} expects 2 arguments.")
         return _has_trm(node[1]) or _has_trm(node[2])
+    raise OutDslError(f"Unknown operator: {op!r}")
+
+
+def _has_unprojected_trm(
+    node: OutDslAst, *, projected: bool
+) -> bool:
+    if isinstance(node, str):
+        if node == "TRM":
+            return not projected
+        if node == "INR":
+            return False
+        raise OutDslError(f"Unknown atom: {node!r}")
+    if not isinstance(node, list) or not node:
+        raise OutDslError("Invalid expression.")
+    op = node[0]
+    if not isinstance(op, str):
+        raise OutDslError("Operator must be a symbol.")
+    if op == "lit":
+        if len(node) != 3:
+            raise OutDslError("lit expects 2 arguments.")
+        return False
+    if op == "proj":
+        if len(node) != 3:
+            raise OutDslError("proj expects 2 arguments.")
+        return _has_unprojected_trm(node[1], projected=True)
+    if op in {"unify", "subtract"}:
+        if len(node) != 3:
+            raise OutDslError(f"{op} expects 2 arguments.")
+        return _has_unprojected_trm(
+            node[1], projected=projected
+        ) or _has_unprojected_trm(node[2], projected=projected)
     raise OutDslError(f"Unknown operator: {op!r}")
 
 

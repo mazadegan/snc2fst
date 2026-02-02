@@ -12,6 +12,7 @@ from snc2fst.out_dsl import (
     OutDslError,
     extract_out_features,
     extract_trm_dependent_features,
+    out_uses_full_trm,
 )
 from snc2fst.rules import Rule
 
@@ -86,3 +87,24 @@ def test_compute_p_features_matches_out_dsl_analysis() -> None:
 def test_extract_out_features_rejects_unknown_atom() -> None:
     with pytest.raises(OutDslError):
         extract_out_features("VOICE")
+
+
+def test_out_uses_full_trm_detects_unprojected_trm() -> None:
+    assert out_uses_full_trm("TRM") is True
+    assert out_uses_full_trm("(unify TRM (lit + Voice))") is True
+    assert out_uses_full_trm("(subtract TRM (proj TRM (Voice)))") is True
+    assert out_uses_full_trm("(proj TRM (Voice))") is False
+    assert out_uses_full_trm("(unify (proj TRM (Voice)) (lit + Voice))") is False
+
+
+def test_compute_p_features_full_trm_falls_back_to_v() -> None:
+    rule = Rule(
+        id="r3",
+        dir="LEFT",
+        inr=[("+", "Voice")],
+        trm=[],
+        cnd=[("-", "Nasal")],
+        out="(subtract TRM (proj TRM (Voice)))",
+    )
+
+    assert compute_p_features(rule) == compute_v_features(rule)
