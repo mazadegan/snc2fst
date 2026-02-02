@@ -94,6 +94,15 @@ Examples:
 (lit - Voice)
 ```
 
+Signatures:
+
+```
+(lit <+|-> <Feature>)
+(proj <INR|TRM|expr> (<Feature> ...))
+(unify <expr> <expr>)
+(subtract <expr> <expr>)
+```
+
 ### Validate files
 
 Rules validation requires an alphabet:
