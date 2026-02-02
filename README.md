@@ -49,9 +49,9 @@ Alphabet files are CSV/TSV feature tables:
 Example:
 
 ```csv
-,a,b,c
-Voice,+,-,0
-Consonantal,0,+,-
+            ,a,b,c
+Voice       ,+,-,0
+Consonantal ,0,+,-
 ```
 
 ## CLI quickstart
