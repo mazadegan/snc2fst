@@ -1,6 +1,6 @@
 ## 0. Goal
 
-Implement a **rule-to-FST compiler** in Python that outputs an **explicit OpenFst machine** (and can be printed in AT&T text format) for S&C-style rules.
+Implement a **rule-to-FST compiler** in Python that outputs an **explicit FST machine** (and can be printed in AT&T text format) for S&C-style rules.
 
 Key requirement: build the **canonicalized/merged transducer** (T_V) **directly**, without first constructing a brute-force (T) and then merging.
 
@@ -15,7 +15,7 @@ This design targets rules where (|V|) is typically small (≈ 2–8), so (|\Sigm
 * (P \subseteq V): **Out-visible TRM features** (the subset of features of `TRM` that `out` actually depends on)
 * (\Omega(\mathcal F)): all consistent (possibly underspecified) bundles over (\mathcal F)
 * (\Sigma_V): witness alphabet over (V), size (3^{|V|})
-* (T_V): explicit OpenFst transducer over (\Sigma_V)
+* (T_V): explicit transducer over (\Sigma_V)
 
 Canonicalization map (conceptual):
 
@@ -38,10 +38,11 @@ In implementation we operate directly on projected bundles (symbols in (\Sigma_V
 
 ### Outputs
 
-* An explicit OpenFst machine (binary `.fst`) with:
+* An explicit FST machine (binary `.fst`) with:
 
   * integer-labeled symbols
   * attached input/output SymbolTables
+  * compiled via OpenFst CLI tools from AT&T text
 * Optionally, AT&T text via `fstprint`
 
 ---
@@ -125,7 +126,7 @@ Given `k = |V|`, enumerate all tuples in `{0,1,2}^k`:
 
 ### 6.2 Integer label encoding
 
-OpenFst uses integer labels; reserve `0` for epsilon.
+FSTs use integer labels; reserve `0` for epsilon.
 Use base-3 encoding:
 
 $$
@@ -256,37 +257,18 @@ Typically set all states final (length-preserving mapping). If you add boundary 
 
 ---
 
-## 8. OpenFst construction details
+## 8. FST construction details
 
-### 8.1 Using pywrapfst
-
-If Python bindings are available:
-
-* create `VectorFst`
-* add states
-* set start state
-* set all finals
-* add arcs with:
-
-  * `ilabel = label(xV)`
-  * `olabel = label(yV)`
-  * tropical semiring: weight 0
-  * `nextstate = ...`
-* attach SymbolTables:
-
-  * `set_input_symbols(symtab)`
-  * `set_output_symbols(symtab)`
-
-### 8.2 AT&T output
+### 8.1 AT&T output
 
 To print with readable symbols:
 
 * write symtab to file
 * `fstprint --isymbols=... --osymbols=... Tv.fst > Tv.att`
 
-### 8.3 If pywrapfst is not available
+### 8.2 Binary compilation
 
-It should be made available.
+Emit AT&T text and use OpenFst CLI tools for compilation and inspection.
 
 ---
 
@@ -343,7 +325,7 @@ For each rule:
 * evaluate with:
 
   1. a direct Python reference interpreter of the S&C rule over projected bundles
-  2. the compiled OpenFst machine
+  2. the compiled machine
 * assert outputs match
 
 ### 11.3 Regression tests for AT&T output
@@ -374,7 +356,7 @@ For each rule:
 2. Implement class predicate compilation for `inr/trm/cnd`
 3. Implement DSL parser + evaluator for `lit/proj/subtract/unify`
 4. Implement `V` extraction and TRM-sensitivity–based `P` extraction
-5. Build explicit (T_V) with pywrapfst
+5. Build explicit (T_V) and emit AT&T text
 6. Print AT&T with symbol tables
 7. Add direction reversal wrapper in CLI
 
