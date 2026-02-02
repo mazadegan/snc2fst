@@ -167,7 +167,7 @@ def _validate_rule_features(
 
 def _validate_rules_file(
     rules_path: Path, alphabet_path: Path | None
-) -> None:
+) -> list[Rule]:
     payload = _load_json(rules_path)
 
     if alphabet_path is None:
@@ -196,6 +196,7 @@ def _validate_rules_file(
             raise typer.BadParameter(
                 f"Rule {rule.id} out is invalid: {exc}"
             ) from exc
+    return rules
 
 
 def _validate_input_words(
@@ -276,20 +277,52 @@ def validate(
         "-q",
         help="Suppress success output.",
     ),
+    dump_vp: bool = typer.Option(
+        False,
+        "--dump-vp",
+        help="Print V and P feature sets for rules.",
+    ),
 ) -> None:
     """Validate a rules JSON, alphabet CSV/TSV, or input words JSON."""
     kind_value = kind.lower() if kind else None
     if kind_value is None:
         if input_path.suffix.lower() == ".json":
-            kind_value = "rules"
+            try:
+                payload = _load_json(input_path)
+            except typer.BadParameter:
+                payload = None
+            if isinstance(payload, dict) and "rules" in payload:
+                kind_value = "rules"
+            elif isinstance(payload, list):
+                kind_value = "input"
+            else:
+                raise typer.BadParameter(
+                    "Unable to infer JSON kind; use --kind."
+                )
         else:
             kind_value = "alphabet"
 
     if kind_value == "rules":
-        _validate_rules_file(input_path, alphabet)
+        rules = _validate_rules_file(input_path, alphabet)
+        if dump_vp:
+            from .feature_analysis import compute_p_features, compute_v_features
+
+            for rule in rules:
+                v_features = sorted(compute_v_features(rule))
+                p_features = sorted(compute_p_features(rule))
+                typer.echo(f"{rule.id} V: {', '.join(v_features)}")
+                typer.echo(f"{rule.id} P: {', '.join(p_features)}")
     elif kind_value == "alphabet":
+        if dump_vp:
+            raise typer.BadParameter(
+                "--dump-vp is only valid for rules validation."
+            )
         _table_to_json(input_path, delimiter)
     elif kind_value == "input":
+        if dump_vp:
+            raise typer.BadParameter(
+                "--dump-vp is only valid for rules validation."
+            )
         _validate_input_words(input_path, alphabet)
     else:
         raise typer.BadParameter(
@@ -458,6 +491,11 @@ def eval_rule(
         "--strict",
         help="Fail if an output bundle has no matching symbol in the alphabet.",
     ),
+    dump_vp: bool = typer.Option(
+        False,
+        "--dump-vp",
+        help="Print V and P feature sets for debugging.",
+    ),
 ) -> None:
     """Evaluate a rule against an input word list.
 
@@ -493,6 +531,13 @@ def eval_rule(
             ) from exc
 
     rule = _select_rule(rules, rule_id)
+    if dump_vp:
+        from .feature_analysis import compute_p_features, compute_v_features
+
+        v_features = sorted(compute_v_features(rule))
+        p_features = sorted(compute_p_features(rule))
+        typer.echo(f"V: {', '.join(v_features)}")
+        typer.echo(f"P: {', '.join(p_features)}")
     try:
         segments = json.loads(input_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
