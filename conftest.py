@@ -11,7 +11,7 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption(
         "--stress-rules",
         type=int,
-        default=50,
+        default=1000,
         help="Rule count for TvMachine stress tests.",
     )
     parser.addoption(
@@ -23,7 +23,7 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption(
         "--stress-max-len",
         type=int,
-        default=15,
+        default=10,
         help="Max word length for TvMachine stress tests.",
     )
     parser.addoption(

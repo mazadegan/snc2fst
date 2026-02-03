@@ -704,6 +704,11 @@ def eval_rule(
             bundle_to_symbol=bundle_to_symbol,
             strict=strict,
         )
+        if include_input:
+            results_with_input = [
+                {"input": word, "output": output_word}
+                for word, output_word in zip(segments, output_words)
+            ]
         if compare:
             raise typer.BadParameter("--compare requires --fst or --tv.")
 
