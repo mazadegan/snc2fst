@@ -20,9 +20,15 @@ class TvMachine:
     arcs: list[tuple[int, int, int, int]]
 
 
-def compile_tv(rule: Rule, *, show_progress: bool = False) -> TvMachine:
-    v_features = compute_v_features(rule)
-    p_features = compute_p_features(rule)
+def compile_tv(
+    rule: Rule,
+    *,
+    show_progress: bool = False,
+    v_features: set[str] | None = None,
+    p_features: set[str] | None = None,
+) -> TvMachine:
+    v_features = v_features if v_features is not None else compute_v_features(rule)
+    p_features = p_features if p_features is not None else compute_p_features(rule)
     v_order = tuple(sorted(v_features))
     p_order = tuple(feature for feature in v_order if feature in p_features)
 

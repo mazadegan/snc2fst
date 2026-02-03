@@ -31,6 +31,7 @@ def evaluate_out_dsl(
     ast, next_idx = _parse_expr(tokens, 0)
     if next_idx != len(tokens):
         raise OutDslError("Unexpected tokens after expression.")
+    _assert_no_bare_bundles(ast)
     context = OutDslContext(
         inr=_validate_bundle(inr),
         trm=_validate_bundle(trm),
@@ -46,6 +47,7 @@ def parse_out_dsl(text: str) -> OutDslAst:
     ast, next_idx = _parse_expr(tokens, 0)
     if next_idx != len(tokens):
         raise OutDslError("Unexpected tokens after expression.")
+    _assert_no_bare_bundles(ast)
     return ast
 
 
@@ -62,6 +64,21 @@ def extract_trm_dependent_features(text: str) -> set[str]:
 def out_uses_full_trm(text: str) -> bool:
     ast = parse_out_dsl(text)
     return _has_unprojected_trm(ast, projected=False)
+
+
+def out_uses_all(text: str) -> bool:
+    ast = parse_out_dsl(text)
+    return _has_all(ast)
+
+
+def out_uses_all_inr(text: str) -> bool:
+    ast = parse_out_dsl(text)
+    return "INR" in _all_targets(ast)
+
+
+def out_uses_all_trm(text: str) -> bool:
+    ast = parse_out_dsl(text)
+    return "TRM" in _all_targets(ast)
 
 
 def _validate_bundle(bundle: FeatureBundle) -> FeatureBundle:
@@ -132,6 +149,8 @@ def _eval(node: object, context: OutDslContext) -> FeatureBundle:
         return _eval_lit(node, context)
     if op == "proj":
         return _eval_proj(node, context)
+    if op == "all":
+        return _eval_all(node, context)
     if op == "unify":
         return _eval_unify(node, context)
     if op == "subtract":
@@ -172,6 +191,10 @@ def _collect_features(node: OutDslAst) -> set[str]:
                 raise OutDslError("Feature list entries must be symbols.")
             listed.add(item)
         return bundle_features | listed
+    if op == "all":
+        if len(node) != 2:
+            raise OutDslError("all expects 1 argument.")
+        return _collect_features(node[1])
     if op in {"unify", "subtract"}:
         if len(node) != 3:
             raise OutDslError(f"{op} expects 2 arguments.")
@@ -232,6 +255,12 @@ def _collect_trm_dependent_features_inner(
         if bundle_has_trm:
             trm_features |= listed
         return trm_features, bundle_has_trm
+    if op == "all":
+        if len(node) != 2:
+            raise OutDslError("all expects 1 argument.")
+        return _collect_trm_dependent_features_inner(
+            node[1], trm_context=trm_context
+        )
 
     if op in {"unify", "subtract"}:
         if len(node) != 3:
@@ -268,6 +297,10 @@ def _has_trm(node: OutDslAst) -> bool:
         if len(node) != 3:
             raise OutDslError("proj expects 2 arguments.")
         return _has_trm(node[1])
+    if op == "all":
+        if len(node) != 2:
+            raise OutDslError("all expects 1 argument.")
+        return _has_trm(node[1])
     if op in {"unify", "subtract"}:
         if len(node) != 3:
             raise OutDslError(f"{op} expects 2 arguments.")
@@ -297,12 +330,149 @@ def _has_unprojected_trm(
         if len(node) != 3:
             raise OutDslError("proj expects 2 arguments.")
         return _has_unprojected_trm(node[1], projected=True)
+    if op == "all":
+        if len(node) != 2:
+            raise OutDslError("all expects 1 argument.")
+        return _has_unprojected_trm(node[1], projected=projected)
     if op in {"unify", "subtract"}:
         if len(node) != 3:
             raise OutDslError(f"{op} expects 2 arguments.")
         return _has_unprojected_trm(
             node[1], projected=projected
         ) or _has_unprojected_trm(node[2], projected=projected)
+    raise OutDslError(f"Unknown operator: {op!r}")
+
+
+def _has_all(node: OutDslAst) -> bool:
+    if isinstance(node, str):
+        if node in {"TRM", "INR"}:
+            return False
+        raise OutDslError(f"Unknown atom: {node!r}")
+    if not isinstance(node, list) or not node:
+        raise OutDslError("Invalid expression.")
+    op = node[0]
+    if not isinstance(op, str):
+        raise OutDslError("Operator must be a symbol.")
+    if op == "lit":
+        if len(node) != 3:
+            raise OutDslError("lit expects 2 arguments.")
+        return False
+    if op == "proj":
+        if len(node) != 3:
+            raise OutDslError("proj expects 2 arguments.")
+        return _has_all(node[1])
+    if op == "all":
+        if len(node) != 2:
+            raise OutDslError("all expects 1 argument.")
+        return True
+    if op in {"unify", "subtract"}:
+        if len(node) != 3:
+            raise OutDslError(f"{op} expects 2 arguments.")
+        return _has_all(node[1]) or _has_all(node[2])
+    raise OutDslError(f"Unknown operator: {op!r}")
+
+
+def _assert_no_bare_bundles(ast: OutDslAst) -> None:
+    if _has_bare_bundle(ast, explicit_full=False, allow_direct=False):
+        raise OutDslError(
+            "Bare INR/TRM is not allowed; use (all ...) or (proj ...)."
+        )
+
+
+def _has_bare_bundle(
+    node: OutDslAst, *, explicit_full: bool, allow_direct: bool
+) -> bool:
+    if isinstance(node, str):
+        if node in {"INR", "TRM"}:
+            return not explicit_full and not allow_direct
+        return False
+    if not isinstance(node, list) or not node:
+        raise OutDslError("Invalid expression.")
+    op = node[0]
+    if not isinstance(op, str):
+        raise OutDslError("Operator must be a symbol.")
+    if op == "lit":
+        if len(node) != 3:
+            raise OutDslError("lit expects 2 arguments.")
+        return False
+    if op == "proj":
+        if len(node) != 3:
+            raise OutDslError("proj expects 2 arguments.")
+        return _has_bare_bundle(
+            node[1], explicit_full=explicit_full, allow_direct=True
+        )
+    if op == "all":
+        if len(node) != 2:
+            raise OutDslError("all expects 1 argument.")
+        return _has_bare_bundle(
+            node[1], explicit_full=True, allow_direct=True
+        )
+    if op in {"unify", "subtract"}:
+        if len(node) != 3:
+            raise OutDslError(f"{op} expects 2 arguments.")
+        return _has_bare_bundle(
+            node[1], explicit_full=explicit_full, allow_direct=False
+        ) or _has_bare_bundle(
+            node[2], explicit_full=explicit_full, allow_direct=False
+        )
+    raise OutDslError(f"Unknown operator: {op!r}")
+
+
+def _all_targets(node: OutDslAst) -> set[str]:
+    if isinstance(node, str):
+        if node in {"TRM", "INR"}:
+            return set()
+        raise OutDslError(f"Unknown atom: {node!r}")
+    if not isinstance(node, list) or not node:
+        raise OutDslError("Invalid expression.")
+    op = node[0]
+    if not isinstance(op, str):
+        raise OutDslError("Operator must be a symbol.")
+    if op == "lit":
+        if len(node) != 3:
+            raise OutDslError("lit expects 2 arguments.")
+        return set()
+    if op == "proj":
+        if len(node) != 3:
+            raise OutDslError("proj expects 2 arguments.")
+        return _all_targets(node[1])
+    if op == "all":
+        if len(node) != 2:
+            raise OutDslError("all expects 1 argument.")
+        return _collect_bundle_atoms(node[1])
+    if op in {"unify", "subtract"}:
+        if len(node) != 3:
+            raise OutDslError(f"{op} expects 2 arguments.")
+        return _all_targets(node[1]) | _all_targets(node[2])
+    raise OutDslError(f"Unknown operator: {op!r}")
+
+
+def _collect_bundle_atoms(node: OutDslAst) -> set[str]:
+    if isinstance(node, str):
+        if node in {"TRM", "INR"}:
+            return {node}
+        raise OutDslError(f"Unknown atom: {node!r}")
+    if not isinstance(node, list) or not node:
+        raise OutDslError("Invalid expression.")
+    op = node[0]
+    if not isinstance(op, str):
+        raise OutDslError("Operator must be a symbol.")
+    if op == "lit":
+        if len(node) != 3:
+            raise OutDslError("lit expects 2 arguments.")
+        return set()
+    if op == "proj":
+        if len(node) != 3:
+            raise OutDslError("proj expects 2 arguments.")
+        return _collect_bundle_atoms(node[1])
+    if op == "all":
+        if len(node) != 2:
+            raise OutDslError("all expects 1 argument.")
+        return _collect_bundle_atoms(node[1])
+    if op in {"unify", "subtract"}:
+        if len(node) != 3:
+            raise OutDslError(f"{op} expects 2 arguments.")
+        return _collect_bundle_atoms(node[1]) | _collect_bundle_atoms(node[2])
     raise OutDslError(f"Unknown operator: {op!r}")
 
 
@@ -337,6 +507,12 @@ def _eval_proj(node: list[object], context: OutDslContext) -> FeatureBundle:
     if not features:
         return {}
     return {feature: bundle[feature] for feature in features if feature in bundle}
+
+
+def _eval_all(node: list[object], context: OutDslContext) -> FeatureBundle:
+    if len(node) != 2:
+        raise OutDslError("all expects 1 argument.")
+    return _eval(node[1], context)
 
 
 def _eval_unify(node: list[object], context: OutDslContext) -> FeatureBundle:

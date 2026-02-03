@@ -20,7 +20,7 @@ def test_compile_writes_att_and_symtab(tmp_path: Path) -> None:
                 "inr": [["+","Voice"]],
                 "trm": [["+","Consonantal"]],
                 "cnd": [],
-                "out": "(unify (subtract TRM (proj TRM (Voice))) (proj INR (Voice)))",
+                "out": "(unify (subtract (all TRM) (proj TRM (Voice))) (proj INR (Voice)))",
             }
         ]
     }

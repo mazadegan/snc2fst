@@ -14,7 +14,7 @@ def test_evaluate_out_dsl_complex_expression() -> None:
     features = {"Voice", "Consonantal", "Continuant"}
     inr = {"Voice": "+", "Consonantal": "-"}
     trm = {"Voice": "-", "Continuant": "+"}
-    expr = "(unify (subtract TRM (proj TRM (Voice))) (proj INR (Voice)))"
+    expr = "(unify (subtract (all TRM) (proj TRM (Voice))) (proj INR (Voice)))"
 
     result = evaluate_out_dsl(expr, inr=inr, trm=trm, features=features)
 

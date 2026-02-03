@@ -57,9 +57,9 @@ def _random_out_expr(rng: random.Random, features: list[str]) -> str:
         lambda: f"(proj INR ({feature_list}))",
         lambda: f"(proj TRM ({feature_list}))",
         lambda: f"(unify (proj INR ({f1})) (proj TRM ({f2})))",
-        lambda: f"(subtract TRM (proj TRM ({f1})))",
+        lambda: f"(subtract (all TRM) (proj TRM ({f1})))",
         lambda: f"(unify (lit + {f1}) (proj INR ({f2})))",
-        lambda: f"(subtract INR (proj TRM ({f2})))",
+        lambda: f"(subtract (all INR) (proj TRM ({f2})))",
         lambda: f"(lit + {f1})",
         lambda: f"(lit - {f1})",
     ]

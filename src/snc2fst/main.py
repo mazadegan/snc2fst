@@ -282,6 +282,11 @@ def validate(
         "--dump-vp",
         help="Print V and P feature sets for rules.",
     ),
+    fst_stats: bool = typer.Option(
+        False,
+        "--fst-stats",
+        help="Print estimated states/arcs for the compiled FST.",
+    ),
 ) -> None:
     """Validate a rules JSON, alphabet CSV/TSV, or input words JSON."""
     kind_value = kind.lower() if kind else None
@@ -304,24 +309,46 @@ def validate(
 
     if kind_value == "rules":
         rules = _validate_rules_file(input_path, alphabet)
-        if dump_vp:
+        if dump_vp or fst_stats:
             from .feature_analysis import compute_p_features, compute_v_features
+            if alphabet is None:
+                raise typer.BadParameter(
+                    "--dump-vp/--fst-stats requires --alphabet."
+                )
+            alphabet_features = _load_alphabet_features(alphabet)
 
             for rule in rules:
-                v_features = sorted(compute_v_features(rule))
-                p_features = sorted(compute_p_features(rule))
-                typer.echo(f"{rule.id} V: {', '.join(v_features)}")
-                typer.echo(f"{rule.id} P: {', '.join(p_features)}")
+                v_features = sorted(
+                    compute_v_features(
+                        rule, alphabet_features=alphabet_features
+                    )
+                )
+                p_features = sorted(
+                    compute_p_features(
+                        rule, alphabet_features=alphabet_features
+                    )
+                )
+                if dump_vp:
+                    typer.echo(f"{rule.id} V: {', '.join(v_features)}")
+                    typer.echo(f"{rule.id} P: {', '.join(p_features)}")
+                if fst_stats:
+                    v_size = len(v_features)
+                    p_size = len(p_features)
+                    state_count = 1 + (3 ** p_size)
+                    arc_count = state_count * (3 ** v_size)
+                    typer.echo(
+                        f"{rule.id} states: {state_count} arcs: {arc_count}"
+                    )
     elif kind_value == "alphabet":
-        if dump_vp:
+        if dump_vp or fst_stats:
             raise typer.BadParameter(
-                "--dump-vp is only valid for rules validation."
+                "--dump-vp/--fst-stats is only valid for rules validation."
             )
         _table_to_json(input_path, delimiter)
     elif kind_value == "input":
-        if dump_vp:
+        if dump_vp or fst_stats:
             raise typer.BadParameter(
-                "--dump-vp is only valid for rules validation."
+                "--dump-vp/--fst-stats is only valid for rules validation."
             )
         _validate_input_words(input_path, alphabet)
     else:
@@ -398,6 +425,9 @@ def compile_rule(
     except ValidationError as exc:
         raise typer.BadParameter(format_validation_error(exc)) from exc
 
+    from .feature_analysis import compute_p_features, compute_v_features
+
+    features: set[str] | None = None
     if alphabet is not None:
         features = _load_alphabet_features(alphabet)
         for rule in rules:
@@ -417,8 +447,23 @@ def compile_rule(
                 ) from exc
 
     rule = _select_rule(rules, rule_id)
-    _enforce_arc_limit(rule, max_arcs)
-    machine = compile_tv(rule, show_progress=progress)
+    _enforce_arc_limit(rule, max_arcs, alphabet_features=features)
+    v_features = (
+        compute_v_features(rule, alphabet_features=features)
+        if features is not None
+        else None
+    )
+    p_features = (
+        compute_p_features(rule, alphabet_features=features)
+        if features is not None
+        else None
+    )
+    machine = compile_tv(
+        rule,
+        show_progress=progress,
+        v_features=v_features,
+        p_features=p_features,
+    )
     if progress:
         typer.echo("writing output...")
 
@@ -538,7 +583,8 @@ def eval_rule(
             "Evaluation requires an alphabet; pass --alphabet."
         )
     alphabet_data = _load_alphabet(alphabet)
-    features = set(alphabet_data.feature_schema.features)
+    feature_order = tuple(alphabet_data.feature_schema.features)
+    features = set(feature_order)
     for rule in rules:
         _validate_rule_features(rule, features, "inr")
         _validate_rule_features(rule, features, "trm")
@@ -556,13 +602,21 @@ def eval_rule(
             ) from exc
 
     rule = _select_rule(rules, rule_id)
-    if dump_vp:
-        from .feature_analysis import compute_p_features, compute_v_features
+    from .feature_analysis import compute_p_features, compute_v_features
 
-        v_features = sorted(compute_v_features(rule))
-        p_features = sorted(compute_p_features(rule))
-        typer.echo(f"V: {', '.join(v_features)}")
-        typer.echo(f"P: {', '.join(p_features)}")
+    alphabet_features = set(feature_order)
+    v_features = compute_v_features(rule, alphabet_features=alphabet_features)
+    p_features = compute_p_features(rule, alphabet_features=alphabet_features)
+    v_order = (
+        feature_order
+        if v_features == alphabet_features
+        else tuple(sorted(v_features))
+    )
+    if dump_vp:
+        v_features_sorted = sorted(v_features)
+        p_features_sorted = sorted(p_features)
+        typer.echo(f"V: {', '.join(v_features_sorted)}")
+        typer.echo(f"P: {', '.join(p_features_sorted)}")
     try:
         segments = json.loads(input_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
@@ -576,7 +630,6 @@ def eval_rule(
 
     symbol_to_bundle: dict[str, dict[str, str]] = {}
     bundle_to_symbol: dict[tuple[str, ...], str] = {}
-    feature_order = tuple(alphabet_data.feature_schema.features)
     for row in alphabet_data.rows:
         symbol_to_bundle[row.symbol] = dict(row.features)
         bundle_key = tuple(row.features[feature] for feature in feature_order)
@@ -600,6 +653,8 @@ def eval_rule(
             symbol_to_bundle=symbol_to_bundle,
             bundle_to_symbol=bundle_to_symbol,
             strict=strict,
+            v_features=v_features,
+            p_features=p_features,
         )
         fst_words = _evaluate_with_fst(
             rule=rule,
@@ -619,6 +674,7 @@ def eval_rule(
                 symbol_to_bundle=symbol_to_bundle,
                 bundle_to_symbol=bundle_to_symbol,
                 strict=strict,
+                v_order=v_order,
             )
             diffs = (
                 _label_diffs("ref vs tv", _diff_word_lists(ref_words, tv_words))
@@ -653,6 +709,7 @@ def eval_rule(
                 symbol_to_bundle=symbol_to_bundle,
                 bundle_to_symbol=bundle_to_symbol,
                 strict=strict,
+                v_order=v_order,
             )
             diffs = _diff_word_lists(ref_words, output_words)
             if diffs:
@@ -673,6 +730,8 @@ def eval_rule(
             symbol_to_bundle=symbol_to_bundle,
             bundle_to_symbol=bundle_to_symbol,
             strict=strict,
+            v_features=v_features,
+            p_features=p_features,
         )
         if compare:
             ref_words = _evaluate_with_reference(
@@ -682,6 +741,7 @@ def eval_rule(
                 symbol_to_bundle=symbol_to_bundle,
                 bundle_to_symbol=bundle_to_symbol,
                 strict=strict,
+                v_order=v_order,
             )
             diffs = _diff_word_lists(ref_words, output_words)
             if diffs:
@@ -703,6 +763,7 @@ def eval_rule(
             symbol_to_bundle=symbol_to_bundle,
             bundle_to_symbol=bundle_to_symbol,
             strict=strict,
+            v_order=v_order,
         )
         if include_input:
             results_with_input = [
@@ -855,11 +916,17 @@ def _format_word_inline(word: list[object]) -> str:
     return f'[{",".join(rendered_items)}]'
 
 
-def _enforce_arc_limit(rule: Rule, max_arcs: int) -> None:
+def _enforce_arc_limit(
+    rule: Rule, max_arcs: int, *, alphabet_features: set[str] | None = None
+) -> None:
     from .feature_analysis import compute_p_features, compute_v_features
 
-    v_size = len(compute_v_features(rule))
-    p_size = len(compute_p_features(rule))
+    v_size = len(
+        compute_v_features(rule, alphabet_features=alphabet_features)
+    )
+    p_size = len(
+        compute_p_features(rule, alphabet_features=alphabet_features)
+    )
     arc_count = (1 + (3 ** p_size)) * (3 ** v_size)
     if arc_count > max_arcs:
         raise typer.BadParameter(
@@ -903,8 +970,12 @@ def _evaluate_with_reference(
     symbol_to_bundle: dict[str, dict[str, str]],
     bundle_to_symbol: dict[tuple[str, ...], str],
     strict: bool,
+    v_order: tuple[str, ...] | None = None,
 ) -> list[list[object]]:
-    from .evaluator import evaluate_rule_on_bundles
+    from .evaluator import (
+        evaluate_rule_on_bundles,
+        evaluate_rule_on_bundles_with_order,
+    )
 
     output_words: list[list[object]] = []
     for idx, word in enumerate(words):
@@ -923,7 +994,12 @@ def _evaluate_with_reference(
                     f"Word {idx} has unknown symbol: {sym!r}"
                 )
             bundles.append(symbol_to_bundle[sym])
-        evaluated = evaluate_rule_on_bundles(rule, bundles)
+        if v_order is None:
+            evaluated = evaluate_rule_on_bundles(rule, bundles)
+        else:
+            evaluated = evaluate_rule_on_bundles_with_order(
+                rule, bundles, v_order
+            )
         output_syms: list[object] = []
         for bundle in evaluated:
             bundle_key = tuple(
@@ -949,10 +1025,14 @@ def _evaluate_with_tv(
     symbol_to_bundle: dict[str, dict[str, str]],
     bundle_to_symbol: dict[tuple[str, ...], str],
     strict: bool,
+    v_features: set[str] | None = None,
+    p_features: set[str] | None = None,
 ) -> list[list[object]]:
     from .tv_compiler import compile_tv, run_tv_machine
 
-    machine = compile_tv(rule)
+    machine = compile_tv(
+        rule, v_features=v_features, p_features=p_features
+    )
     v_order = machine.v_order
     if set(v_order) != set(feature_order):
         raise typer.BadParameter(

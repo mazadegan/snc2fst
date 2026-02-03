@@ -21,6 +21,18 @@ def evaluate_rule_on_bundles(
     return [_bundle_from_tuple(bundle, v_order) for bundle in result]
 
 
+def evaluate_rule_on_bundles_with_order(
+    rule: Rule,
+    segments: Iterable[dict[str, str]],
+    v_order: tuple[str, ...],
+) -> list[dict[str, str]]:
+    tuple_segments = [
+        _tuple_from_bundle(segment, v_order) for segment in segments
+    ]
+    result = evaluate_rule_on_tuples(rule, tuple_segments, v_order)
+    return [_bundle_from_tuple(bundle, v_order) for bundle in result]
+
+
 def evaluate_rule_on_tuples(
     rule: Rule, segments: Iterable[BundleTuple], v_order: tuple[str, ...]
 ) -> list[BundleTuple]:

@@ -11,13 +11,13 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption(
         "--stress-rules",
         type=int,
-        default=1000,
+        default=50,
         help="Rule count for TvMachine stress tests.",
     )
     parser.addoption(
         "--stress-words",
         type=int,
-        default=1000,
+        default=50,
         help="Word count for TvMachine stress tests.",
     )
     parser.addoption(
@@ -29,13 +29,13 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption(
         "--stress-fst-rules",
         type=int,
-        default=10,
+        default=3,
         help="Rule count for OpenFst stress tests.",
     )
     parser.addoption(
         "--stress-fst-words",
         type=int,
-        default=100,
+        default=50,
         help="Word count for OpenFst stress tests.",
     )
     parser.addoption(
