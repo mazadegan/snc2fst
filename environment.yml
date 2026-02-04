@@ -1,0 +1,13 @@
+name: snc2fst
+channels:
+  - conda-forge
+dependencies:
+  - python>=3.12
+  - pydantic>=2.7
+  - tqdm>=4.66
+  - typer>=0.12
+  - pytest>=8.0
+  - black>=24.0
+  - pip
+  - pip:
+      - -e .

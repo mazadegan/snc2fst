@@ -4,6 +4,14 @@
 ternary-feature alphabet and provides CLI tools for validation, compilation,
 and evaluation.
 
+## Quickstart
+
+```
+conda env create -f environment.yml
+conda activate snc2fst
+snc2fst --help
+```
+
 This project builds the canonicalized/merged transducer (T_V) directly,
 instead of constructing a brute-force transducer and then merging. The direct
 construction is faster, smaller, and matches the design assumption that the
@@ -53,6 +61,45 @@ Example:
 Voice       ,+,-,0
 Consonantal ,0,+,-
 ```
+
+## Setup (Conda)
+
+### Prerequisites
+
+- Conda installed (Miniconda, Anaconda, or Mambaforge).
+
+### Create and activate the environment
+
+From the project root:
+
+```
+conda env create -f environment.yml
+conda activate snc2fst
+```
+
+If you change dependencies later, update the environment with:
+
+```
+conda env update -f environment.yml --prune
+```
+
+### Editable install (already included)
+
+`environment.yml` installs the project in editable mode via `pip -e .`, so the
+`snc2fst` CLI is available immediately and changes to `src/` are reflected
+without reinstallation.
+
+### Verify the install
+
+```
+snc2fst --help
+```
+
+### Optional: OpenFst CLI tools
+
+If you want to compile and use `.fst` binaries with `--fst`, install OpenFst
+CLI tools on your system and ensure `fstcompile`, `fstprint`, etc. are on PATH.
+You can still use `snc2fst` without OpenFst by omitting `--fst`.
 
 ## CLI quickstart
 
@@ -238,28 +285,34 @@ fstprint --isymbols=samples/tv.sym --osymbols=samples/tv.sym samples/tv.fst
 
 ## Testing
 
+Make sure your conda environment is active:
+
+```
+conda activate snc2fst
+```
+
 Run the full test suite (stress tests excluded by default):
 
 ```
-uv run pytest
+pytest
 ```
 
 Include stress tests:
 
 ```
-uv run pytest --stress-test
+pytest --stress-test
 ```
 
 Show the stress-test progress bar (pytest captures output unless `-s` is used):
 
 ```
-uv run pytest --stress-test -s
+pytest --stress-test -s
 ```
 
 Tune stress-test sizes:
 
 ```
-uv run pytest --stress-test \
+pytest --stress-test \
   --stress-rules 50 \
   --stress-words 400 \
   --stress-max-len 20 \

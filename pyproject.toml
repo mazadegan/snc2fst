@@ -22,9 +22,6 @@ line-length = 79
 [project.scripts]
 snc2fst = "snc2fst.main:app"
 
-[tool.uv]
-package = true
-
 [tool.setuptools]
 package-dir = {"" = "src"}
 
