@@ -8,6 +8,7 @@ dependencies:
   - typer>=0.12
   - pytest>=8.0
   - black>=24.0
+  - openfst
   - pip
   - pip:
       - -e .
