@@ -116,7 +116,7 @@ snc2fst --help
 ### Generate sample files
 
 ```
-snc2fst generate samples/
+snc2fst init samples/
 ```
 
 ## Example rules.json

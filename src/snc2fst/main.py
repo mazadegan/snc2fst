@@ -420,6 +420,7 @@ def compile_rule(
 
     The compiled machine is canonical LEFT; RIGHT direction is handled by
     reversing input/output at evaluation time.
+    This command requires Pynini/pywrapfst.
     """
     payload = _load_json(rules_path)
     try:
@@ -684,10 +685,10 @@ def eval_rule(
     output.write_text(rendered, encoding="utf-8")
 
 
-@app.command("generate")
-def generate_samples(
+@app.command("init")
+def init_samples(
     output_dir: Path = typer.Argument(
-        ...,
+        Path("."),
         dir_okay=True,
         writable=True,
         help="Directory to write sample alphabet, rules, and input files.",
@@ -699,7 +700,11 @@ def generate_samples(
         help="Overwrite existing sample files.",
     ),
 ) -> None:
-    """Generate sample alphabet.csv, rules.json, and input.json files."""
+    """Generate sample alphabet.csv, rules.json, and input.json files.
+
+    The sample alphabet has 3 features and 27 symbols, the rules file has
+    two rules, and the input file includes multiple example sentences.
+    """
     output_dir.mkdir(parents=True, exist_ok=True)
 
     alphabet_path = output_dir / "alphabet.csv"
@@ -717,43 +722,50 @@ def generate_samples(
                 "Sample files already exist: " + ", ".join(existing)
             )
 
-    alphabet_path.write_text(
-        ",a,b,c,d\n"
-        "Voice,+,-,0,-\n"
-        "Consonantal,0,+,-,0\n",
-        encoding="utf-8",
-    )
-    rules_payload = {
-        "rules": [
-            {
-                "id": "spread_voice_right",
-                "dir": "RIGHT",
-                "inr": [["+","Voice"]],
-                "trm": [["+","Consonantal"]],
-                "cnd": [],
-                "out": "(proj TRM (Voice))",
-            }
-        ]
-    }
-    rules_path.write_text(
+    features = ["F1", "F2", "F3"]
+    digits = [0, 1, 2]
+    symbols = ["0"] + [chr(code) for code in range(ord("A"), ord("Z") + 1)]
+    value_map = {0: "0", 1: "+", 2: "-"}
+    header = "," + ",".join(symbols)
+    rows = [header]
+    for idx, feature in enumerate(features):
+        values = []
+        for sym_index in range(len(symbols)):
+            digit = (sym_index // (3 ** idx)) % 3
+            values.append(value_map[digit])
+        rows.append(f"{feature}," + ",".join(values))
+    alphabet_path.write_text("\n".join(rows) + "\n", encoding="utf-8")
+    rules_text = (
         "{\n"
         '  "rules": [\n'
         "    {\n"
-        '      "id": "spread_voice_right",\n'
+        '      "id": "spread_f1_right",\n'
         '      "dir": "RIGHT",\n'
-        '      "inr": [["+","Voice"]],\n'
-        '      "trm": [["+","Consonantal"]],\n'
+        '      "inr": [["+","F1"]],\n'
+        '      "trm": [["+", "F2"]],\n'
         '      "cnd": [],\n'
-        '      "out": "(proj TRM (Voice))"\n'
+        '      "out": "(proj TRM (F1))"\n'
+        "    },\n"
+        "    {\n"
+        '      "id": "set_f3_left",\n'
+        '      "dir": "LEFT",\n'
+        '      "inr": [],\n'
+        '      "trm": [],\n'
+        '      "cnd": [],\n'
+        '      "out": "(lit + F3)"\n'
         "    }\n"
         "  ]\n"
-        "}\n",
-        encoding="utf-8",
+        "}\n"
     )
-    input_path.write_text(
-        '[\n  ["a","b","c","a"]\n]\n',
-        encoding="utf-8",
+    rules_path.write_text(rules_text, encoding="utf-8")
+    input_text = (
+        "[\n"
+        '  ["0", "A", "B", "C", "D"],\n'
+        '  ["J", "K", "L"],\n'
+        '  ["T", "U", "V", "W", "X", "Y", "Z"]\n'
+        "]\n"
     )
+    input_path.write_text(input_text, encoding="utf-8")
 
 
 def _format_word_list(words: list[list[object]]) -> str:
