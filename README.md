@@ -66,7 +66,8 @@ Consonantal ,0,+,-
 
 ### Prerequisites
 
-- Conda installed (Miniconda, Anaconda, or Mambaforge).
+- Conda installed (Miniconda, Anaconda, or Mambaforge). Conda is the supported
+  install path.
 
 ### Create and activate the environment
 
@@ -289,6 +290,12 @@ Run the full test suite (stress tests excluded by default):
 
 ```
 pytest
+```
+
+Run the smoke test:
+
+```
+pytest -m smoke
 ```
 
 Include stress tests:

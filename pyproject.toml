@@ -19,6 +19,11 @@ dev = [
 [tool.black]
 line-length = 79
 
+[tool.pytest.ini_options]
+markers = [
+    "smoke: quick end-to-end CLI smoke test",
+]
+
 [project.scripts]
 snc2fst = "snc2fst.main:app"
 
