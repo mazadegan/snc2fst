@@ -191,9 +191,9 @@ def evaluate_with_pynini(
         rule, v_features=v_features, p_features=p_features
     )
     v_order = machine.v_order
-    if set(v_order) != set(feature_order):
+    if not set(v_order).issubset(set(feature_order)):
         raise typer.BadParameter(
-            "Alphabet features do not match Pynini features: "
+            "Alphabet features do not cover Pynini features: "
             f"alphabet={sorted(feature_order)}; pynini={sorted(v_order)}"
         )
     fst_machine = machine.fst

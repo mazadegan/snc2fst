@@ -683,6 +683,7 @@ def eval_rule(
     else:
         rendered = _format_word_list(output_words)
     output.write_text(rendered, encoding="utf-8")
+    typer.echo("OK")
 
 
 @app.command("init")
@@ -758,6 +759,17 @@ def init_samples(
         "]\n"
     )
     input_path.write_text(input_text, encoding="utf-8")
+    base = Path.cwd().resolve()
+    def _relpath(path: Path) -> Path:
+        resolved = path.resolve()
+        try:
+            return resolved.relative_to(base)
+        except ValueError:
+            return resolved
+    typer.echo("OK")
+    typer.echo(f"alphabet: {_relpath(alphabet_path)}")
+    typer.echo(f"rules: {_relpath(rules_path)}")
+    typer.echo(f"input: {_relpath(input_path)}")
 
 
 def _format_word_list(words: list[list[object]]) -> str:
