@@ -12,37 +12,19 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         "--stress-rules",
         type=int,
         default=50,
-        help="Rule count for TvMachine stress tests.",
+        help="Rule count for Pynini stress tests.",
     )
     parser.addoption(
         "--stress-words",
         type=int,
         default=50,
-        help="Word count for TvMachine stress tests.",
+        help="Word count for Pynini stress tests.",
     )
     parser.addoption(
         "--stress-max-len",
         type=int,
         default=10,
-        help="Max word length for TvMachine stress tests.",
-    )
-    parser.addoption(
-        "--stress-fst-rules",
-        type=int,
-        default=3,
-        help="Rule count for OpenFst stress tests.",
-    )
-    parser.addoption(
-        "--stress-fst-words",
-        type=int,
-        default=50,
-        help="Word count for OpenFst stress tests.",
-    )
-    parser.addoption(
-        "--stress-fst-max-len",
-        type=int,
-        default=12,
-        help="Max word length for OpenFst stress tests.",
+        help="Max word length for Pynini stress tests.",
     )
     parser.addoption(
         "--stress-progress",
