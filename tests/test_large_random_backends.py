@@ -11,11 +11,7 @@ SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(SRC_ROOT))
 
 from snc2fst.feature_analysis import compute_v_features
-from snc2fst.main import (
-    _evaluate_with_pynini,
-    _evaluate_with_reference,
-    _evaluate_with_tv,
-)
+from snc2fst.main import _evaluate_with_pynini, _evaluate_with_reference
 from snc2fst.rules import Rule
 
 
@@ -159,59 +155,6 @@ def _format_word(
             symbols.append(repr(item))
             bundles.append({})
     return f"symbols={symbols}\nbundles={bundles}"
-
-
-@pytest.mark.stress
-def test_random_tv_backend_matches_reference_large(
-    pytestconfig: pytest.Config,
-) -> None:
-    rng = random.Random(0)
-    rule_count = pytestconfig.getoption("--stress-rules")
-    word_count = pytestconfig.getoption("--stress-words")
-    max_len = pytestconfig.getoption("--stress-max-len")
-    progress = _progress(
-        rule_count,
-        "tv rules",
-        pytestconfig.getoption("--stress-progress"),
-    )
-    for idx in range(rule_count):
-        rule = _random_rule(rng, idx)
-        v_order = tuple(sorted(compute_v_features(rule)))
-        symbol_to_bundle, bundle_to_symbol, symbols = _make_symbol_maps(v_order)
-        words = _random_words(rng, symbols, word_count, max_len)
-        ref_words = _evaluate_with_reference(
-            rule=rule,
-            words=words,
-            feature_order=v_order,
-            symbol_to_bundle=symbol_to_bundle,
-            bundle_to_symbol=bundle_to_symbol,
-            strict=True,
-        )
-        tv_words = _evaluate_with_tv(
-            rule=rule,
-            words=words,
-            feature_order=v_order,
-            symbol_to_bundle=symbol_to_bundle,
-            bundle_to_symbol=bundle_to_symbol,
-            strict=True,
-        )
-        mismatch = _first_mismatch(ref_words, tv_words)
-        if mismatch is not None:
-            word_idx, expected, actual = mismatch
-            input_word = words[word_idx] if word_idx < len(words) else []
-            message = "\n".join(
-                [
-                    "TvMachine output differs from reference.",
-                    f"rule: {_format_rule(rule)}",
-                    f"v_order: {list(v_order)}",
-                    f"word_index: {word_idx}",
-                    f"input: {_format_word(input_word, symbol_to_bundle)}",
-                    f"expected: {expected}",
-                    f"actual: {actual}",
-                ]
-            )
-            pytest.fail(message)
-        progress(idx + 1)
 
 
 @pytest.mark.stress

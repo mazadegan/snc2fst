@@ -16,7 +16,6 @@ from .compile_pynini_fst import (
     evaluate_with_pynini,
     write_att_pynini,
 )
-from .tv_compiler import compile_tv
 
 
 app = typer.Typer(add_completion=False)
@@ -531,11 +530,6 @@ def eval_rule(
         "--include-input",
         help="Include both input and output words in the result.",
     ),
-    tv: bool = typer.Option(
-        False,
-        "--tv",
-        help="Use the in-memory TvMachine backend to evaluate words.",
-    ),
     pynini: bool = typer.Option(
         False,
         "--pynini",
@@ -544,7 +538,7 @@ def eval_rule(
     compare: bool = typer.Option(
         False,
         "--compare",
-        help="Compare backend output to the reference evaluator.",
+        help="Compare Pynini output to the reference evaluator.",
     ),
     strict: bool = typer.Option(
         False,
@@ -632,45 +626,7 @@ def eval_rule(
     output_words: list[list[object]] = []
     results_with_input: list[dict[str, list[object]]] = []
 
-    if tv and pynini:
-        raise typer.BadParameter(
-            "Choose only one backend: --tv or --pynini."
-        )
-
-    if tv:
-        output_words = _evaluate_with_tv(
-            rule=rule,
-            words=segments,
-            feature_order=feature_order,
-            symbol_to_bundle=symbol_to_bundle,
-            bundle_to_symbol=bundle_to_symbol,
-            strict=strict,
-            v_features=v_features,
-            p_features=p_features,
-        )
-        if compare:
-            ref_words = _evaluate_with_reference(
-                rule=rule,
-                words=segments,
-                feature_order=feature_order,
-                symbol_to_bundle=symbol_to_bundle,
-                bundle_to_symbol=bundle_to_symbol,
-                strict=strict,
-                v_order=v_order,
-            )
-            diffs = _diff_word_lists(ref_words, output_words)
-            if diffs:
-                message = (
-                    "TvMachine output differs from reference:\n"
-                    + "\n".join(diffs)
-                )
-                raise typer.BadParameter(message)
-        if include_input:
-            results_with_input = [
-                {"input": word, "output": output_word}
-                for word, output_word in zip(segments, output_words)
-            ]
-    elif pynini:
+    if pynini:
         output_words = _evaluate_with_pynini(
             rule=rule,
             words=segments,
@@ -719,7 +675,7 @@ def eval_rule(
                 for word, output_word in zip(segments, output_words)
             ]
         if compare:
-            raise typer.BadParameter("--compare requires --tv or --pynini.")
+            raise typer.BadParameter("--compare requires --pynini.")
 
     if include_input:
         rendered = _format_word_pairs(results_with_input)
@@ -941,98 +897,6 @@ def _evaluate_with_reference(
                 output_syms.append(bundle_to_symbol[bundle_key])
         output_words.append(output_syms)
     return output_words
-
-
-def _evaluate_with_tv(
-    *,
-    rule: Rule,
-    words: list[object],
-    feature_order: tuple[str, ...],
-    symbol_to_bundle: dict[str, dict[str, str]],
-    bundle_to_symbol: dict[tuple[str, ...], str],
-    strict: bool,
-    v_features: set[str] | None = None,
-    p_features: set[str] | None = None,
-) -> list[list[object]]:
-    from .tv_compiler import compile_tv, run_tv_machine
-
-    machine = compile_tv(
-        rule, v_features=v_features, p_features=p_features
-    )
-    v_order = machine.v_order
-    if set(v_order) != set(feature_order):
-        raise typer.BadParameter(
-            "Alphabet features do not match TvMachine features: "
-            f"alphabet={sorted(feature_order)}; tv={sorted(v_order)}"
-        )
-    output_words: list[list[object]] = []
-    for idx, word in enumerate(words):
-        if not isinstance(word, list):
-            raise typer.BadParameter(
-                f"Word at index {idx} is not an array of symbols."
-            )
-        word_symbols = word[::-1] if rule.dir == "RIGHT" else word
-        bundles: list[dict[str, str]] = []
-        for sym in word_symbols:
-            if not isinstance(sym, str) or not sym.strip():
-                raise typer.BadParameter(
-                    f"Word {idx} contains a non-string symbol."
-                )
-            if sym not in symbol_to_bundle:
-                raise typer.BadParameter(
-                    f"Word {idx} has unknown symbol: {sym!r}"
-                )
-            bundles.append(symbol_to_bundle[sym])
-
-        inputs = [
-            _bundle_to_tv_tuple(bundle, v_order) for bundle in bundles
-        ]
-        outputs = run_tv_machine(machine, inputs)
-        output_syms: list[object] = []
-        for bundle_tuple in outputs:
-            bundle = _tv_tuple_to_bundle(bundle_tuple, v_order)
-            bundle_key = tuple(
-                bundle.get(feature, "0") for feature in feature_order
-            )
-            if bundle_key not in bundle_to_symbol:
-                if strict:
-                    raise typer.BadParameter(
-                        f"Output bundle has no symbol: {bundle_key}"
-                    )
-                output_syms.append(bundle)
-            else:
-                output_syms.append(bundle_to_symbol[bundle_key])
-        if rule.dir == "RIGHT":
-            output_syms = list(reversed(output_syms))
-        output_words.append(output_syms)
-    return output_words
-
-
-def _bundle_to_tv_tuple(
-    bundle: dict[str, str], v_order: tuple[str, ...]
-) -> tuple[int, ...]:
-    values: list[int] = []
-    for feature in v_order:
-        value = bundle.get(feature, "0")
-        if value == "+":
-            values.append(1)
-        elif value == "-":
-            values.append(2)
-        else:
-            values.append(0)
-    return tuple(values)
-
-
-def _tv_tuple_to_bundle(
-    bundle: tuple[int, ...], v_order: tuple[str, ...]
-) -> dict[str, str]:
-    result: dict[str, str] = {}
-    for feature, value in zip(v_order, bundle):
-        if value == 1:
-            result[feature] = "+"
-        elif value == 2:
-            result[feature] = "-"
-    return result
 
 
 def _evaluate_with_pynini(

@@ -30,7 +30,7 @@ def test_compile_writes_att_and_symtab(tmp_path: Path) -> None:
     rules_path = tmp_path / "rules.json"
     rules_path.write_text(json.dumps(rules), encoding="utf-8")
 
-    output_path = tmp_path / "tv.att"
+    output_path = tmp_path / "rule.att"
     runner = CliRunner()
     result = runner.invoke(app, ["compile", str(rules_path), str(output_path)])
     assert result.exit_code == 0, result.output
@@ -57,7 +57,7 @@ def test_compile_outputs_expected_att_and_symtab(tmp_path: Path) -> None:
     rules_path = tmp_path / "rules.json"
     rules_path.write_text(json.dumps(rules), encoding="utf-8")
 
-    output_path = tmp_path / "tv.att"
+    output_path = tmp_path / "rule.att"
     runner = CliRunner()
     result = runner.invoke(app, ["compile", str(rules_path), str(output_path)])
     assert result.exit_code == 0, result.output
@@ -102,7 +102,7 @@ def test_compile_respects_max_arcs(tmp_path: Path) -> None:
     rules_path = tmp_path / "rules.json"
     rules_path.write_text(json.dumps(rules), encoding="utf-8")
 
-    output_path = tmp_path / "tv.att"
+    output_path = tmp_path / "rule.att"
     runner = CliRunner()
     result = runner.invoke(
         app,
