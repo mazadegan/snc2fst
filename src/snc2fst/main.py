@@ -11,6 +11,7 @@ from ._version import __version__
 from .alphabet import Alphabet, format_validation_error
 from .out_dsl import OutDslError, evaluate_out_dsl
 from .rules import RulesFile, Rule
+from .compile_pynini_fst import evaluate_with_pynini, write_pynini_fst
 from .tv_compiler import compile_tv, write_att
 
 
@@ -393,6 +394,13 @@ def compile_rule(
         writable=True,
         help="Symbol table output path (defaults next to output).",
     ),
+    pynini_fst: Path | None = typer.Option(
+        None,
+        "--pynini",
+        dir_okay=False,
+        writable=True,
+        help="Write a compiled FST binary using Pynini.",
+    ),
     max_arcs: int = typer.Option(
         5_000_000,
         "--max-arcs",
@@ -463,6 +471,14 @@ def compile_rule(
     else:
         symtab_path = output.with_suffix(".sym")
     write_att(machine, str(output), symtab_path=str(symtab_path))
+    if pynini_fst is not None:
+        write_pynini_fst(
+            rule,
+            pynini_fst,
+            show_progress=progress,
+            v_features=v_features,
+            p_features=p_features,
+        )
     arc_count = len(machine.arcs)
     state_count = len(machine.final_states)
     symtab_display = symtab_path
@@ -471,6 +487,8 @@ def compile_rule(
     )
     typer.echo(f"att: {output}")
     typer.echo(f"symtab: {symtab_display}")
+    if pynini_fst is not None:
+        typer.echo(f"fst: {pynini_fst}")
 
 
 @app.command("eval")
@@ -518,10 +536,15 @@ def eval_rule(
         "--tv",
         help="Use the in-memory TvMachine backend to evaluate words.",
     ),
+    pynini: bool = typer.Option(
+        False,
+        "--pynini",
+        help="Use Pynini/pywrapfst to evaluate words.",
+    ),
     compare: bool = typer.Option(
         False,
         "--compare",
-        help="Compare FST output to the reference evaluator.",
+        help="Compare backend output to the reference evaluator.",
     ),
     strict: bool = typer.Option(
         False,
@@ -609,6 +632,11 @@ def eval_rule(
     output_words: list[list[object]] = []
     results_with_input: list[dict[str, list[object]]] = []
 
+    if tv and pynini:
+        raise typer.BadParameter(
+            "Choose only one backend: --tv or --pynini."
+        )
+
     if tv:
         output_words = _evaluate_with_tv(
             rule=rule,
@@ -642,6 +670,39 @@ def eval_rule(
                 {"input": word, "output": output_word}
                 for word, output_word in zip(segments, output_words)
             ]
+    elif pynini:
+        output_words = _evaluate_with_pynini(
+            rule=rule,
+            words=segments,
+            feature_order=feature_order,
+            symbol_to_bundle=symbol_to_bundle,
+            bundle_to_symbol=bundle_to_symbol,
+            strict=strict,
+            v_features=v_features,
+            p_features=p_features,
+        )
+        if compare:
+            ref_words = _evaluate_with_reference(
+                rule=rule,
+                words=segments,
+                feature_order=feature_order,
+                symbol_to_bundle=symbol_to_bundle,
+                bundle_to_symbol=bundle_to_symbol,
+                strict=strict,
+                v_order=v_order,
+            )
+            diffs = _diff_word_lists(ref_words, output_words)
+            if diffs:
+                message = (
+                    "Pynini output differs from reference:\n"
+                    + "\n".join(diffs)
+                )
+                raise typer.BadParameter(message)
+        if include_input:
+            results_with_input = [
+                {"input": word, "output": output_word}
+                for word, output_word in zip(segments, output_words)
+            ]
     else:
         output_words = _evaluate_with_reference(
             rule=rule,
@@ -658,7 +719,7 @@ def eval_rule(
                 for word, output_word in zip(segments, output_words)
             ]
         if compare:
-            raise typer.BadParameter("--compare requires --tv.")
+            raise typer.BadParameter("--compare requires --tv or --pynini.")
 
     if include_input:
         rendered = _format_word_pairs(results_with_input)
@@ -972,6 +1033,29 @@ def _tv_tuple_to_bundle(
         elif value == 2:
             result[feature] = "-"
     return result
+
+
+def _evaluate_with_pynini(
+    *,
+    rule: Rule,
+    words: list[object],
+    feature_order: tuple[str, ...],
+    symbol_to_bundle: dict[str, dict[str, str]],
+    bundle_to_symbol: dict[tuple[str, ...], str],
+    strict: bool,
+    v_features: set[str] | None = None,
+    p_features: set[str] | None = None,
+) -> list[list[object]]:
+    return evaluate_with_pynini(
+        rule=rule,
+        words=words,
+        feature_order=feature_order,
+        symbol_to_bundle=symbol_to_bundle,
+        bundle_to_symbol=bundle_to_symbol,
+        strict=strict,
+        v_features=v_features,
+        p_features=p_features,
+    )
 
 
 def main() -> None:

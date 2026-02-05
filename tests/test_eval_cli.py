@@ -196,6 +196,53 @@ def test_eval_cli_tv_compare_right_rule(tmp_path: Path) -> None:
     assert result.exit_code == 0, result.output
 
 
+def test_eval_cli_pynini_compare_right_rule(tmp_path: Path) -> None:
+    pytest.importorskip("pywrapfst")
+    rules = {
+        "rules": [
+            {
+                "id": "spread_voice_right",
+                "dir": "RIGHT",
+                "inr": [["+","Voice"]],
+                "trm": [["+","Consonantal"]],
+                "cnd": [],
+                "out": "(proj TRM (Voice))",
+            }
+        ]
+    }
+    rules_path = tmp_path / "rules.json"
+    rules_path.write_text(json.dumps(rules), encoding="utf-8")
+
+    alphabet_path = tmp_path / "alphabet.csv"
+    alphabet_path.write_text(
+        ",a,b,c,d\nVoice,+,-,0,-\nConsonantal,0,+,-,0\n",
+        encoding="utf-8",
+    )
+
+    input_segments = [
+        ["a", "b", "c", "a"],
+    ]
+    input_path = tmp_path / "input.json"
+    input_path.write_text(json.dumps(input_segments), encoding="utf-8")
+
+    output_path = tmp_path / "output.json"
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "eval",
+            str(rules_path),
+            str(input_path),
+            str(output_path),
+            "--alphabet",
+            str(alphabet_path),
+            "--pynini",
+            "--compare",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+
+
 def test_eval_cli_dump_vp(tmp_path: Path) -> None:
     rules = {
         "rules": [
@@ -241,4 +288,3 @@ def test_eval_cli_dump_vp(tmp_path: Path) -> None:
     assert result.exit_code == 0, result.output
     assert "V:" in result.output
     assert "P:" in result.output
-

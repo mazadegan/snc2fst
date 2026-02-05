@@ -191,6 +191,12 @@ snc2fst validate samples/input.json --kind input --alphabet samples/alphabet.csv
 snc2fst compile samples/rules.json samples/tv.att --alphabet samples/alphabet.csv
 ```
 
+Compile and also emit a binary FST (requires `pynini`):
+
+```
+snc2fst compile samples/rules.json samples/tv.att --alphabet samples/alphabet.csv --pynini samples/tv.fst
+```
+
 Show progress bar when generating large FSTs:
 
 ```
@@ -254,6 +260,12 @@ Use the in‑memory TvMachine backend and compare to the reference evaluator:
 snc2fst eval samples/rules.json samples/input.json samples/out.json --alphabet samples/alphabet.csv --tv --compare
 ```
 
+Use the Pynini backend and compare to the reference evaluator:
+
+```
+snc2fst eval samples/rules.json samples/input.json samples/out.json --alphabet samples/alphabet.csv --pynini --compare
+```
+
 ### Inspect V and P
 
 Print the feature sets used to build the machine:
@@ -300,10 +312,11 @@ pytest --stress-test \
 
 ## Backends
 
-`eval` can run two backends:
+`eval` can run three backends:
 
 - **reference** (default): direct S&C interpreter
 - **TvMachine** (`--tv`): in‑memory machine
+- **Pynini** (`--pynini`): OpenFst via Pynini/pywrapfst
 Use `--compare` to cross‑check outputs.
 
 ## Performance tips
