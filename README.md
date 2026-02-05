@@ -125,12 +125,12 @@ snc2fst init samples/
 {
   "rules": [
     {
-      "id": "spread_voice_right",
+      "id": "spread_f1_right",
       "dir": "RIGHT",
-      "inr": [["+","Voice"]],
-      "trm": [["+","Consonantal"]],
+      "inr": [["+","F1"]],
+      "trm": [["+", "F2"]],
       "cnd": [],
-      "out": "(unify INR (proj TRM (Voice)))"
+      "out": "(proj TRM (F1))"
     }
   ]
 }
@@ -220,7 +220,9 @@ Example `input.json`:
 
 ```json
 [
-  ["a","b","c","a"]
+  ["0", "A", "B", "C", "D"],
+  ["J", "K", "L"],
+  ["T", "U", "V", "W", "X", "Y", "Z"]
 ]
 ```
 
@@ -228,7 +230,9 @@ Example `output.json` (default):
 
 ```json
 [
-  ["d","b","c","a"]
+  ["D", "A", "B", "C", "D"],
+  ["J", "K", "L"],
+  ["T", "U", "V", "W", "X", "Y", "Z"]
 ]
 ```
 
@@ -236,7 +240,9 @@ Example with `--include-input`:
 
 ```json
 [
-  {"input": ["a","b","c","a"], "output": ["d","b","c","a"]}
+  {"input": ["0", "A", "B", "C", "D"], "output": ["D", "A", "B", "C", "D"]},
+  {"input": ["J", "K", "L"], "output": ["J", "K", "L"]},
+  {"input": ["T", "U", "V", "W", "X", "Y", "Z"], "output": ["T", "U", "V", "W", "X", "Y", "Z"]}
 ]
 ```
 
@@ -256,7 +262,7 @@ Strict symbol mapping (error if output bundle has no symbol):
 snc2fst eval samples/rules.json samples/input.json samples/out.json --alphabet samples/alphabet.csv --strict
 ```
 
-Use the Pynini backend and compare to the reference evaluator:
+Use the Pynini backend and compare to the reference evaluator (`--compare` requires `--pynini`):
 
 ```
 snc2fst eval samples/rules.json samples/input.json samples/out.json --alphabet samples/alphabet.csv --pynini --compare
