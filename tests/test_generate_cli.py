@@ -27,7 +27,7 @@ def test_init_creates_sample_files(tmp_path: Path) -> None:
 
     rules = json.loads(rules_path.read_text(encoding="utf-8"))
     assert "rules" in rules
-    assert len(rules["rules"]) == 2
+    assert len(rules["rules"]) == 1
     input_payload = json.loads(input_path.read_text(encoding="utf-8"))
     assert isinstance(input_payload, list)
     assert len(input_payload) >= 3

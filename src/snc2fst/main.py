@@ -703,7 +703,7 @@ def init_samples(
     """Generate sample alphabet.csv, rules.json, and input.json files.
 
     The sample alphabet has 3 features and 27 symbols, the rules file has
-    two rules, and the input file includes multiple example sentences.
+    one rule, and the input file includes multiple example sentences.
     """
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -745,14 +745,6 @@ def init_samples(
         '      "trm": [["+", "F2"]],\n'
         '      "cnd": [],\n'
         '      "out": "(proj TRM (F1))"\n'
-        "    },\n"
-        "    {\n"
-        '      "id": "set_f3_left",\n'
-        '      "dir": "LEFT",\n'
-        '      "inr": [],\n'
-        '      "trm": [],\n'
-        '      "cnd": [],\n'
-        '      "out": "(lit + F3)"\n'
         "    }\n"
         "  ]\n"
         "}\n"
