@@ -23,7 +23,7 @@ def test_compile_writes_att_and_symtab(tmp_path: Path) -> None:
                 "inr": [["+","Voice"]],
                 "trm": [["+","Consonantal"]],
                 "cnd": [],
-                "out": "(unify (subtract (all TRM) (proj TRM (Voice))) (proj INR (Voice)))",
+                "out": "(unify (subtract (expand TRM) (proj TRM (Voice))) (proj INR (Voice)))",
             }
         ]
     }
@@ -50,7 +50,7 @@ def test_compile_outputs_expected_att_and_symtab(tmp_path: Path) -> None:
                 "inr": [],
                 "trm": [],
                 "cnd": [],
-                "out": "(all INR)",
+                "out": "(expand INR)",
             }
         ]
     }

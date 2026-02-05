@@ -144,17 +144,17 @@ Signatures:
 ```
 (lit <+|-> <Feature>)
 (proj <INR|TRM|expr> (<Feature> ...))
-(all <INR|TRM|expr>)
+(expand <INR|TRM|expr>)
 (unify <expr> <expr>)
 (subtract <expr> <expr>)
 ```
 
 Notes:
 
-- `INR`/`TRM` cannot appear bare; wrap them in `(all ...)` to use a full bundle
+- `INR`/`TRM` cannot appear bare; wrap them in `(expand ...)` to use a full bundle
   or `(proj ...)` to select features explicitly.
-- `(all TRM)` expands V and P to the full alphabet feature set (larger FST).
-- `(all INR)` expands V to the full alphabet feature set.
+- `(expand TRM)` expands V and P to the full alphabet feature set (larger FST).
+- `(expand INR)` expands V to the full alphabet feature set.
 
 ### Validate files
 

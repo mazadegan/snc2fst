@@ -24,7 +24,7 @@ def test_validate_rules_json(tmp_path: Path) -> None:
                 "inr": [["+","Voice"]],
                 "trm": [["+","Consonantal"]],
                 "cnd": [],
-                "out": "(unify (subtract (all TRM) (proj TRM (Voice))) (proj INR (Voice)))",
+                "out": "(unify (subtract (expand TRM) (proj TRM (Voice))) (proj INR (Voice)))",
             }
         ]
     }

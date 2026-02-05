@@ -37,9 +37,7 @@ Grammar must be able to express:
 
 ### 2.2 Output formats (MVP)
 
-* **OpenFST text** (FST in AT&T-like format)
-
-**Design decision (v0.1):** OpenFST text only. Other export targets (e.g., Pynini builder scripts) can be revisited after v0.1 once the core compilation semantics stabilize.
+* AT&T Format
 
 ---
 

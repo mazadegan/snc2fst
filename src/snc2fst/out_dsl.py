@@ -149,8 +149,8 @@ def _eval(node: object, context: OutDslContext) -> FeatureBundle:
         return _eval_lit(node, context)
     if op == "proj":
         return _eval_proj(node, context)
-    if op == "all":
-        return _eval_all(node, context)
+    if op == "expand":
+        return _eval_expand(node, context)
     if op == "unify":
         return _eval_unify(node, context)
     if op == "subtract":
@@ -191,9 +191,9 @@ def _collect_features(node: OutDslAst) -> set[str]:
                 raise OutDslError("Feature list entries must be symbols.")
             listed.add(item)
         return bundle_features | listed
-    if op == "all":
+    if op == "expand":
         if len(node) != 2:
-            raise OutDslError("all expects 1 argument.")
+            raise OutDslError("expand expects 1 argument.")
         return _collect_features(node[1])
     if op in {"unify", "subtract"}:
         if len(node) != 3:
@@ -255,9 +255,9 @@ def _collect_trm_dependent_features_inner(
         if bundle_has_trm:
             trm_features |= listed
         return trm_features, bundle_has_trm
-    if op == "all":
+    if op == "expand":
         if len(node) != 2:
-            raise OutDslError("all expects 1 argument.")
+            raise OutDslError("expand expects 1 argument.")
         return _collect_trm_dependent_features_inner(
             node[1], trm_context=trm_context
         )
@@ -297,9 +297,9 @@ def _has_trm(node: OutDslAst) -> bool:
         if len(node) != 3:
             raise OutDslError("proj expects 2 arguments.")
         return _has_trm(node[1])
-    if op == "all":
+    if op == "expand":
         if len(node) != 2:
-            raise OutDslError("all expects 1 argument.")
+            raise OutDslError("expand expects 1 argument.")
         return _has_trm(node[1])
     if op in {"unify", "subtract"}:
         if len(node) != 3:
@@ -330,9 +330,9 @@ def _has_unprojected_trm(
         if len(node) != 3:
             raise OutDslError("proj expects 2 arguments.")
         return _has_unprojected_trm(node[1], projected=True)
-    if op == "all":
+    if op == "expand":
         if len(node) != 2:
-            raise OutDslError("all expects 1 argument.")
+            raise OutDslError("expand expects 1 argument.")
         return _has_unprojected_trm(node[1], projected=projected)
     if op in {"unify", "subtract"}:
         if len(node) != 3:
@@ -361,9 +361,9 @@ def _has_all(node: OutDslAst) -> bool:
         if len(node) != 3:
             raise OutDslError("proj expects 2 arguments.")
         return _has_all(node[1])
-    if op == "all":
+    if op == "expand":
         if len(node) != 2:
-            raise OutDslError("all expects 1 argument.")
+            raise OutDslError("expand expects 1 argument.")
         return True
     if op in {"unify", "subtract"}:
         if len(node) != 3:
@@ -375,7 +375,7 @@ def _has_all(node: OutDslAst) -> bool:
 def _assert_no_bare_bundles(ast: OutDslAst) -> None:
     if _has_bare_bundle(ast, explicit_full=False, allow_direct=False):
         raise OutDslError(
-            "Bare INR/TRM is not allowed; use (all ...) or (proj ...)."
+            "Bare INR/TRM is not allowed; use (expand ...) or (proj ...)."
         )
 
 
@@ -401,9 +401,9 @@ def _has_bare_bundle(
         return _has_bare_bundle(
             node[1], explicit_full=explicit_full, allow_direct=True
         )
-    if op == "all":
+    if op == "expand":
         if len(node) != 2:
-            raise OutDslError("all expects 1 argument.")
+            raise OutDslError("expand expects 1 argument.")
         return _has_bare_bundle(
             node[1], explicit_full=True, allow_direct=True
         )
@@ -436,9 +436,9 @@ def _all_targets(node: OutDslAst) -> set[str]:
         if len(node) != 3:
             raise OutDslError("proj expects 2 arguments.")
         return _all_targets(node[1])
-    if op == "all":
+    if op == "expand":
         if len(node) != 2:
-            raise OutDslError("all expects 1 argument.")
+            raise OutDslError("expand expects 1 argument.")
         return _collect_bundle_atoms(node[1])
     if op in {"unify", "subtract"}:
         if len(node) != 3:
@@ -465,9 +465,9 @@ def _collect_bundle_atoms(node: OutDslAst) -> set[str]:
         if len(node) != 3:
             raise OutDslError("proj expects 2 arguments.")
         return _collect_bundle_atoms(node[1])
-    if op == "all":
+    if op == "expand":
         if len(node) != 2:
-            raise OutDslError("all expects 1 argument.")
+            raise OutDslError("expand expects 1 argument.")
         return _collect_bundle_atoms(node[1])
     if op in {"unify", "subtract"}:
         if len(node) != 3:
@@ -509,9 +509,9 @@ def _eval_proj(node: list[object], context: OutDslContext) -> FeatureBundle:
     return {feature: bundle[feature] for feature in features if feature in bundle}
 
 
-def _eval_all(node: list[object], context: OutDslContext) -> FeatureBundle:
+def _eval_expand(node: list[object], context: OutDslContext) -> FeatureBundle:
     if len(node) != 2:
-        raise OutDslError("all expects 1 argument.")
+        raise OutDslError("expand expects 1 argument.")
     return _eval(node[1], context)
 
 
