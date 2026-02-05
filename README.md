@@ -187,6 +187,8 @@ snc2fst validate samples/input.json --kind input --alphabet samples/alphabet.csv
 
 ### Compile a rule to AT&T + symtab
 
+> Requires `pynini`/`pywrapfst` (the compiler backend).
+
 ```
 snc2fst compile samples/rules.json samples/tv.att --alphabet samples/alphabet.csv
 ```

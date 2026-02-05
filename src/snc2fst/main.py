@@ -11,8 +11,12 @@ from ._version import __version__
 from .alphabet import Alphabet, format_validation_error
 from .out_dsl import OutDslError, evaluate_out_dsl
 from .rules import RulesFile, Rule
-from .compile_pynini_fst import evaluate_with_pynini, write_pynini_fst
-from .tv_compiler import compile_tv, write_att
+from .compile_pynini_fst import (
+    compile_pynini_fst,
+    evaluate_with_pynini,
+    write_att_pynini,
+)
+from .tv_compiler import compile_tv
 
 
 app = typer.Typer(add_completion=False)
@@ -457,7 +461,7 @@ def compile_rule(
         if features is not None
         else None
     )
-    machine = compile_tv(
+    machine = compile_pynini_fst(
         rule,
         show_progress=progress,
         v_features=v_features,
@@ -470,17 +474,13 @@ def compile_rule(
         symtab_path = symtab
     else:
         symtab_path = output.with_suffix(".sym")
-    write_att(machine, str(output), symtab_path=str(symtab_path))
+    write_att_pynini(machine, output, symtab_path=symtab_path)
     if pynini_fst is not None:
-        write_pynini_fst(
-            rule,
-            pynini_fst,
-            show_progress=progress,
-            v_features=v_features,
-            p_features=p_features,
-        )
-    arc_count = len(machine.arcs)
-    state_count = len(machine.final_states)
+        machine.fst.write(str(pynini_fst))
+    arc_count = 0
+    for state in machine.fst.states():
+        arc_count += sum(1 for _ in machine.fst.arcs(state))
+    state_count = machine.fst.num_states()
     symtab_display = symtab_path
     typer.echo(
         f"done. states={state_count} arcs={arc_count}"

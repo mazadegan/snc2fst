@@ -138,6 +138,37 @@ def write_pynini_fst(
     machine.fst.write(str(fst_path))
 
 
+def write_att_pynini(
+    machine: PyniniMachine,
+    output_path: Path,
+    *,
+    symtab_path: Path | None = None,
+) -> None:
+    try:
+        import pywrapfst as fst
+    except ImportError as exc:  # pragma: no cover - optional dependency
+        raise typer.BadParameter(
+            "Pynini/pywrapfst not available; install pynini to use --pynini."
+        ) from exc
+
+    lines: list[str] = []
+    arc_count = 0
+    for state in machine.fst.states():
+        for arc in machine.fst.arcs(state):
+            lines.append(
+                f"{state} {arc.nextstate} {arc.ilabel} {arc.olabel} 0"
+            )
+            arc_count += 1
+    zero = fst.Weight.zero(machine.fst.weight_type())
+    for state in machine.fst.states():
+        if machine.fst.final(state) != zero:
+            lines.append(f"{state} 0")
+    output_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    if symtab_path is not None:
+        _write_symtab(machine, symtab_path)
+
+
 def evaluate_with_pynini(
     *,
     rule: Rule,
@@ -403,3 +434,27 @@ def _compile_class_predicate(
         return all(bundle[idx] == value for idx, value in requirements)
 
     return _predicate
+
+
+def _write_symtab(machine: PyniniMachine, path: Path) -> None:
+    lines = ["<eps> 0"]
+    for bundle in _enumerate_sigma(len(machine.v_order)):
+        label = _encode_label(bundle)
+        symbol = _symbol_for_bundle(bundle, machine.v_order)
+        lines.append(f"{symbol} {label}")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _symbol_for_bundle(
+    bundle: BundleTuple, features: tuple[str, ...]
+) -> str:
+    parts: list[str] = []
+    for feature, value in zip(features, bundle):
+        if value == 1:
+            suffix = "+"
+        elif value == 2:
+            suffix = "-"
+        else:
+            suffix = "0"
+        parts.append(f"{feature}{suffix}")
+    return "_".join(parts)
