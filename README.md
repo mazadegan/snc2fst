@@ -4,6 +4,8 @@
 ternary-feature alphabet and provides CLI tools for validation, compilation,
 and evaluation.
 
+This project compiles canonicalized/merged transducers.
+
 ## Quickstart
 
 ```
@@ -12,39 +14,24 @@ conda activate snc2fst
 snc2fst --help
 ```
 
-This project builds the canonicalized/merged transducer (T_V) directly,
-instead of constructing a brute-force transducer and then merging. The direct
-construction is faster, smaller, and matches the design assumption that the
-grammar-visible feature set `V` is small (typically 2–8).
-
-## Why build T_V directly?
-
-S&C rules only depend on a small subset of features `V` and on an even smaller
-subset `P` of TRM features that the `out` expression can observe. By building
-the merged state space indexed by `Σ_P` and emitting only arcs over `Σ_V`,
-we avoid the combinatoric explosion of a brute-force transducer that would later be
-collapsed by canonicalization/merging. Doing this, we get:
-
-- fewer states (1 + 3^|P| instead of 1 + 3^|F|),
-- fewer arcs ((1 + 3^|P|) * 3^|V|),
 
 ## Direction handling
 
 The compiler emits a single canonical **LEFT** machine. For **RIGHT** rules,
-`snc2fst eval` applies the standard reversal wrapper (reverse input, run the
+`snc2fst eval` applies a reversal wrapper (reverse input, run the
 machine, then reverse output). This keeps compilation consistent while still
 allowing both directions at runtime.
 
 ## Feature encoding
 
-Features are ternary:
+Features have ternary polarity:
 
 - `0` = unspecified
 - `+` = plus
 - `-` = minus
 
-A bundle over `V` is a tuple of ternary values in a fixed `V` order. Labels are
-encoded in base‑3 with label 0 reserved for epsilon.
+A bundle over `V` is a tuple of ternary values in the same order as in `V`. 
+Labels are encoded in base‑3 with label 0 reserved for epsilon.
 
 ## Alphabet format
 
@@ -57,9 +44,9 @@ Alphabet files are CSV/TSV feature tables:
 Example:
 
 ```csv
-            ,a,b,c
-Voice       ,+,-,0
-Consonantal ,0,+,-
+  ,A,B,C
+F1,+,-,0
+F2,0,+,-
 ```
 
 ## Setup (Conda)
@@ -188,7 +175,7 @@ snc2fst validate samples/input.json --kind input --alphabet samples/alphabet.csv
 
 ### Compile a rule to AT&T + symtab
 
-> Requires `pynini`/`pywrapfst` (the compiler backend).
+> Uses `pynini`/`pywrapfst`.
 
 ```
 snc2fst compile samples/rules.json samples/rule.att --alphabet samples/alphabet.csv
@@ -257,7 +244,7 @@ Include input + output in the result:
 snc2fst eval samples/rules.json samples/input.json samples/out.json --alphabet samples/alphabet.csv --include-input
 ```
 
-Strict symbol mapping (error if output bundle has no symbol):
+Strict symbol mapping (error if output bundle has no matching symbol in alphabet):
 
 ```
 snc2fst eval samples/rules.json samples/input.json samples/out.json --alphabet samples/alphabet.csv --strict
@@ -310,7 +297,7 @@ Show the stress-test progress bar (pytest captures output unless `-s` is used):
 pytest --stress-test -s
 ```
 
-Tune stress-test sizes:
+Adjust stress-test sizes:
 
 ```
 pytest --stress-test \
@@ -330,8 +317,7 @@ Use `--compare` to cross‑check outputs.
 ## Performance tips
 
 - Keep `|V|` and `|P|` small; arc count scales as `(1 + 3^|P|) * 3^|V|`.
-- Use `--max-arcs` to prevent accidental blow‑ups.
-- If you hit the arc limit, reduce features or raise the arc limit.
+- If you hit the arc limit, reduce features or raise the arc limit using `--max-arcs`.
 
 ## Troubleshooting
 
