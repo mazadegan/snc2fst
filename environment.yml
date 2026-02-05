@@ -6,6 +6,7 @@ dependencies:
   - pydantic>=2.7
   - tqdm>=4.66
   - typer>=0.12
+  - pynini
   - pytest>=8.0
   - black>=24.0
   - openfst

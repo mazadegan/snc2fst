@@ -83,6 +83,22 @@ If you change dependencies later, update the environment with:
 conda env update -f environment.yml --prune
 ```
 
+### Python versions
+
+Conda manages Python versions per environment. To use a different Python
+version, create a separate env or update this one:
+
+```
+conda create -n snc2fst-py311 python=3.11
+conda activate snc2fst-py311
+```
+
+Or update the current env in place:
+
+```
+conda install -n snc2fst python=3.12
+```
+
 ### Editable install (already included)
 
 `environment.yml` installs the project in editable mode via `pip -e .`, so the
@@ -94,12 +110,6 @@ without reinstallation.
 ```
 snc2fst --help
 ```
-
-### Optional: OpenFst CLI tools
-
-If you want to compile and use `.fst` binaries with `--fst`, install OpenFst
-CLI tools on your system and ensure `fstcompile`, `fstprint`, etc. are on PATH.
-You can still use `snc2fst` without OpenFst by omitting `--fst`.
 
 ## CLI quickstart
 
@@ -181,12 +191,6 @@ snc2fst validate samples/input.json --kind input --alphabet samples/alphabet.csv
 snc2fst compile samples/rules.json samples/tv.att --alphabet samples/alphabet.csv
 ```
 
-Compile and also emit a binary FST (requires OpenFst tools on PATH):
-
-```
-snc2fst compile samples/rules.json samples/tv.att --alphabet samples/alphabet.csv --fst samples/tv.fst
-```
-
 Show progress bar when generating large FSTs:
 
 ```
@@ -250,22 +254,6 @@ Use the in‑memory TvMachine backend and compare to the reference evaluator:
 snc2fst eval samples/rules.json samples/input.json samples/out.json --alphabet samples/alphabet.csv --tv --compare
 ```
 
-Use a compiled OpenFst binary for evaluation:
-
-```
-snc2fst eval samples/rules.json samples/input.json samples/out.json \
-  --alphabet samples/alphabet.csv \
-  --fst samples/tv.fst
-```
-
-Compare all backends (requires both `--tv` and `--fst`):
-
-```
-snc2fst eval samples/rules.json samples/input.json samples/out.json \
-  --alphabet samples/alphabet.csv \
-  --tv --fst samples/tv.fst --compare-all
-```
-
 ### Inspect V and P
 
 Print the feature sets used to build the machine:
@@ -273,14 +261,6 @@ Print the feature sets used to build the machine:
 ```
 snc2fst eval samples/rules.json samples/input.json samples/out.json --alphabet samples/alphabet.csv --dump-vp
 snc2fst validate samples/rules.json --alphabet samples/alphabet.csv --dump-vp
-```
-
-## OpenFst tools
-
-To print with symbols:
-
-```
-fstprint --isymbols=samples/tv.sym --osymbols=samples/tv.sym samples/tv.fst
 ```
 
 ## Testing
@@ -315,21 +295,16 @@ Tune stress-test sizes:
 pytest --stress-test \
   --stress-rules 50 \
   --stress-words 400 \
-  --stress-max-len 20 \
-  --stress-fst-rules 10 \
-  --stress-fst-words 80 \
-  --stress-fst-max-len 15
+  --stress-max-len 20
 ```
 
 ## Backends
 
-`eval` can run three backends:
+`eval` can run two backends:
 
 - **reference** (default): direct S&C interpreter
 - **TvMachine** (`--tv`): in‑memory machine
-- **OpenFst** (`--fst`): compiled binary FST
-
-Use `--compare` or `--compare-all` to cross‑check outputs.
+Use `--compare` to cross‑check outputs.
 
 ## Performance tips
 
@@ -342,4 +317,3 @@ Use `--compare` or `--compare-all` to cross‑check outputs.
 - **"Evaluation requires an alphabet"** → pass `--alphabet`.
 - **"Unknown symbol"** → input contains symbols not in the alphabet.
 - **"--max-arcs exceeded"** → reduce features or raise `--max-arcs`.
-- **"OpenFst tools not found"** → install OpenFst CLI tools or omit `--fst`.

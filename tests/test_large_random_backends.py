@@ -1,5 +1,4 @@
 import random
-import shutil
 import sys
 import time
 from itertools import product
@@ -12,14 +11,8 @@ SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(SRC_ROOT))
 
 from snc2fst.feature_analysis import compute_v_features
-from snc2fst.main import (
-    _compile_fst,
-    _evaluate_with_fst,
-    _evaluate_with_reference,
-    _evaluate_with_tv,
-)
+from snc2fst.main import _evaluate_with_reference, _evaluate_with_tv
 from snc2fst.rules import Rule
-from snc2fst.tv_compiler import compile_tv, write_att
 
 
 def _random_rule(rng: random.Random, idx: int) -> Rule:
@@ -216,75 +209,3 @@ def test_random_tv_backend_matches_reference_large(
             pytest.fail(message)
         progress(idx + 1)
 
-
-@pytest.mark.skipif(
-    shutil.which("fstcompile") is None
-    or shutil.which("fstcompose") is None
-    or shutil.which("fstshortestpath") is None
-    or shutil.which("fstprint") is None,
-    reason="OpenFst tools not available",
-)
-@pytest.mark.stress
-def test_random_fst_backend_matches_reference_large(
-    tmp_path: Path, pytestconfig: pytest.Config
-) -> None:
-    rng = random.Random(1)
-    rule_count = pytestconfig.getoption("--stress-fst-rules")
-    word_count = pytestconfig.getoption("--stress-fst-words")
-    max_len = pytestconfig.getoption("--stress-fst-max-len")
-    progress = _progress(
-        rule_count,
-        "fst rules",
-        pytestconfig.getoption("--stress-progress"),
-    )
-    for idx in range(rule_count):
-        rule = _random_rule(rng, idx + 1000)
-        v_order = tuple(sorted(compute_v_features(rule)))
-        symbol_to_bundle, bundle_to_symbol, symbols = _make_symbol_maps(v_order)
-        words = _random_words(rng, symbols, word_count, max_len)
-
-        machine = compile_tv(rule)
-        rule_dir = tmp_path / f"rule_{idx}"
-        rule_dir.mkdir(parents=True, exist_ok=True)
-        att_path = rule_dir / "tv.att"
-        symtab_path = rule_dir / "tv.sym"
-        fst_path = rule_dir / "tv.fst"
-
-        write_att(machine, str(att_path), symtab_path=str(symtab_path))
-        _compile_fst(att_path, fst_path)
-
-        ref_words = _evaluate_with_reference(
-            rule=rule,
-            words=words,
-            feature_order=v_order,
-            symbol_to_bundle=symbol_to_bundle,
-            bundle_to_symbol=bundle_to_symbol,
-            strict=True,
-        )
-        fst_words = _evaluate_with_fst(
-            rule=rule,
-            fst=fst_path,
-            fst_symtab=symtab_path,
-            words=words,
-            feature_order=v_order,
-            symbol_to_bundle=symbol_to_bundle,
-            bundle_to_symbol=bundle_to_symbol,
-            strict=True,
-        )
-        mismatch = _first_mismatch(ref_words, fst_words)
-        if mismatch is not None:
-            word_idx, expected, actual = mismatch
-            input_word = words[word_idx] if word_idx < len(words) else []
-            message = "\n".join(
-                [
-                    "FST output differs from reference.",
-                    f"rule: {_format_rule(rule)}",
-                    f"v_order: {list(v_order)}",
-                    f"word_index: {word_idx}",
-                    f"input: {_format_word(input_word, symbol_to_bundle)}",
-                    f"expected: {expected}",
-                    f"actual: {actual}",
-                ]
-            )
-            pytest.fail(message)
-        progress(idx + 1)
