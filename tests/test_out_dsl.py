@@ -36,7 +36,7 @@ def test_evaluate_out_dsl_unknown_feature() -> None:
     features = {"Voice"}
     inr = {"Voice": "+"}
     trm = {"Voice": "-"}
-    expr = "(lit + Continuant)"
+    expr = "(bundle (+ Continuant))"
 
     with pytest.raises(OutDslError):
         evaluate_out_dsl(expr, inr=inr, trm=trm, features=features)
@@ -56,7 +56,7 @@ def test_evaluate_out_dsl_unify_arbitrary_bundle() -> None:
     features = {"Voice", "Continuant", "Consonantal"}
     inr = {}
     trm = {}
-    expr = "(unify (unify (lit + Voice) (lit - Consonantal)) (lit + Continuant))"
+    expr = "(unify (unify (bundle (+ Voice)) (bundle (- Consonantal))) (bundle (+ Continuant)))"
 
     result = evaluate_out_dsl(expr, inr=inr, trm=trm, features=features)
 
@@ -72,7 +72,7 @@ def test_evaluate_out_dsl_subtract_arbitrary_bundle() -> None:
     inr = {}
     trm = {}
     expr = (
-        "(subtract (unify (lit + Voice) (lit - Consonantal)) (lit + Voice))"
+        "(subtract (unify (bundle (+ Voice)) (bundle (- Consonantal))) (bundle (+ Voice)))"
     )
 
     result = evaluate_out_dsl(expr, inr=inr, trm=trm, features=features)
@@ -84,7 +84,7 @@ def test_evaluate_out_dsl_bare_inr() -> None:
     features = {"F1", "F2"}
     inr = {"F1": "-", "F2": "+"}
     trm = {}
-    expr = "(unify INR (lit + F1))"
+    expr = "(unify INR (bundle (+ F1)))"
 
     result = evaluate_out_dsl(expr, inr=inr, trm=trm, features=features)
 

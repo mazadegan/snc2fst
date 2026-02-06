@@ -21,7 +21,7 @@ def test_eval_cli_outputs_json(tmp_path: Path) -> None:
                 "inr": [["+","Voice"]],
                 "trm": [["+","Consonantal"]],
                 "cnd": [],
-                "out": "(lit - Voice)",
+                "out": "(bundle (- Voice))",
             }
         ]
     }

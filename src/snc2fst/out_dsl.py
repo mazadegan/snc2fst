@@ -143,8 +143,8 @@ def _eval(node: object, context: OutDslContext) -> FeatureBundle:
     if not isinstance(op, str):
         raise OutDslError("Operator must be a symbol.")
 
-    if op == "lit":
-        return _eval_lit(node, context)
+    if op == "bundle":
+        return _eval_bundle(node, context)
     if op == "proj":
         return _eval_proj(node, context)
     if op == "unify":
@@ -167,13 +167,10 @@ def _collect_features(node: OutDslAst) -> set[str]:
     if not isinstance(op, str):
         raise OutDslError("Operator must be a symbol.")
 
-    if op == "lit":
-        if len(node) != 3:
-            raise OutDslError("lit expects 2 arguments.")
-        feature = node[2]
-        if not isinstance(feature, str) or not feature.strip():
-            raise OutDslError("lit feature must be a non-empty symbol.")
-        return {feature}
+    if op == "bundle":
+        if len(node) < 2:
+            raise OutDslError("bundle expects one or more pairs.")
+        return _collect_bundle_features(node)
     if op == "proj":
         if len(node) != 3:
             raise OutDslError("proj expects 2 arguments.")
@@ -199,6 +196,20 @@ def _collect_features(node: OutDslAst) -> set[str]:
     raise OutDslError(f"Unknown operator: {op!r}")
 
 
+def _collect_bundle_features(node: list[object]) -> set[str]:
+    listed: set[str] = set()
+    for item in node[1:]:
+        if not isinstance(item, list) or len(item) != 2:
+            raise OutDslError("bundle entries must be (+ Feature) or (- Feature).")
+        polarity, feature = item
+        if polarity not in {"+", "-"}:
+            raise OutDslError("bundle polarity must be '+' or '-'.")
+        if not isinstance(feature, str) or not feature.strip():
+            raise OutDslError("bundle feature must be a non-empty symbol.")
+        listed.add(feature)
+    return listed
+
+
 def _collect_trm_dependent_features(node: OutDslAst) -> set[str]:
     return _collect_trm_dependent_features_inner(
         node, trm_context=_has_trm(node)
@@ -222,13 +233,11 @@ def _collect_trm_dependent_features_inner(
     if not isinstance(op, str):
         raise OutDslError("Operator must be a symbol.")
 
-    if op == "lit":
-        if len(node) != 3:
-            raise OutDslError("lit expects 2 arguments.")
-        feature = node[2]
-        if not isinstance(feature, str) or not feature.strip():
-            raise OutDslError("lit feature must be a non-empty symbol.")
-        return ({feature} if trm_context else set()), False
+    if op == "bundle":
+        if len(node) < 2:
+            raise OutDslError("bundle expects one or more pairs.")
+        features = _collect_bundle_features(node)
+        return (features if trm_context else set()), False
 
     if op == "proj":
         if len(node) != 3:
@@ -280,9 +289,9 @@ def _has_trm(node: OutDslAst) -> bool:
     op = node[0]
     if not isinstance(op, str):
         raise OutDslError("Operator must be a symbol.")
-    if op == "lit":
-        if len(node) != 3:
-            raise OutDslError("lit expects 2 arguments.")
+    if op == "bundle":
+        if len(node) < 2:
+            raise OutDslError("bundle expects one or more pairs.")
         return False
     if op == "proj":
         if len(node) != 3:
@@ -309,9 +318,9 @@ def _has_unprojected_trm(
     op = node[0]
     if not isinstance(op, str):
         raise OutDslError("Operator must be a symbol.")
-    if op == "lit":
-        if len(node) != 3:
-            raise OutDslError("lit expects 2 arguments.")
+    if op == "bundle":
+        if len(node) < 2:
+            raise OutDslError("bundle expects one or more pairs.")
         return False
     if op == "proj":
         if len(node) != 3:
@@ -336,9 +345,9 @@ def _has_all(node: OutDslAst) -> bool:
     op = node[0]
     if not isinstance(op, str):
         raise OutDslError("Operator must be a symbol.")
-    if op == "lit":
-        if len(node) != 3:
-            raise OutDslError("lit expects 2 arguments.")
+    if op == "bundle":
+        if len(node) < 2:
+            raise OutDslError("bundle expects one or more pairs.")
         return False
     if op == "proj":
         if len(node) != 3:
@@ -359,9 +368,9 @@ def _has_bare_target(node: OutDslAst, target: str, *, in_proj: bool = False) -> 
     op = node[0]
     if not isinstance(op, str):
         raise OutDslError("Operator must be a symbol.")
-    if op == "lit":
-        if len(node) != 3:
-            raise OutDslError("lit expects 2 arguments.")
+    if op == "bundle":
+        if len(node) < 2:
+            raise OutDslError("bundle expects one or more pairs.")
         return False
     if op == "proj":
         if len(node) != 3:
@@ -384,9 +393,9 @@ def _has_proj_star(node: OutDslAst, target: str) -> bool:
     op = node[0]
     if not isinstance(op, str):
         raise OutDslError("Operator must be a symbol.")
-    if op == "lit":
-        if len(node) != 3:
-            raise OutDslError("lit expects 2 arguments.")
+    if op == "bundle":
+        if len(node) < 2:
+            raise OutDslError("bundle expects one or more pairs.")
         return False
     if op == "proj":
         if len(node) != 3:
@@ -415,23 +424,29 @@ def _bundle_is_target(node: OutDslAst, target: str) -> bool:
         if len(node) != 3:
             raise OutDslError("proj expects 2 arguments.")
         return _bundle_is_target(node[1], target)
-    if op in {"unify", "subtract", "lit"}:
+    if op in {"unify", "subtract", "bundle"}:
         return False
     raise OutDslError(f"Unknown operator: {op!r}")
 
 
-def _eval_lit(node: list[object], context: OutDslContext) -> FeatureBundle:
-    if len(node) != 3:
-        raise OutDslError("lit expects 2 arguments.")
-    polarity = node[1]
-    feature = node[2]
-    if polarity not in {"+", "-"}:
-        raise OutDslError("lit polarity must be '+' or '-'.")
-    if not isinstance(feature, str) or not feature.strip():
-        raise OutDslError("lit feature must be a non-empty symbol.")
-    if feature not in context.features:
-        raise OutDslError(f"Unknown feature: {feature!r}")
-    return {feature: polarity}
+def _eval_bundle(node: list[object], context: OutDslContext) -> FeatureBundle:
+    if len(node) < 2:
+        raise OutDslError("bundle expects one or more pairs.")
+    result: FeatureBundle = {}
+    for item in node[1:]:
+        if not isinstance(item, list) or len(item) != 2:
+            raise OutDslError("bundle entries must be (+ Feature) or (- Feature).")
+        polarity, feature = item
+        if polarity not in {"+", "-"}:
+            raise OutDslError("bundle polarity must be '+' or '-'.")
+        if not isinstance(feature, str) or not feature.strip():
+            raise OutDslError("bundle feature must be a non-empty symbol.")
+        if feature not in context.features:
+            raise OutDslError(f"Unknown feature: {feature!r}")
+        if feature in result and result[feature] != polarity:
+            continue
+        result[feature] = polarity
+    return result
 
 
 def _eval_proj(node: list[object], context: OutDslContext) -> FeatureBundle:

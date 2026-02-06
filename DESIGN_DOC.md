@@ -116,7 +116,7 @@ Natural classes are interpreted as **conjunctions** of their listed feature cons
 * A **string** containing a program written in the *snc2fst Tiny Lisp*
 * Evaluates to a single **feature bundle**
 * May reference only the bound identifiers `INR` and `TRM`
-* Uses the operations `unify`, `subtract`, `proj`, and `lit`
+* Uses the operations `unify`, `subtract`, `proj`, and `bundle`
 
 The DSL is intentionally pure and limited; it computes feature bundles but performs no mutation or control flow.
 
@@ -131,7 +131,7 @@ Key properties:
 * Pure (no side effects)
 * Expression-only
 * Evaluates to a single feature bundle
-* Supports explicit feature literals via `(lit + F)` / `(lit - F)`
+* Supports explicit feature literals via `(bundle (+ F))` / `(bundle (- F))`
 * Validates feature names against the alphabet feature universe
 
 The DSL exists solely to express feature-bundle transformations in a way that mirrors the formal S&C definitions while remaining readable in JSON.

@@ -126,38 +126,39 @@ Evaluates to the specified bound bundle (i.e., the search initiator INR or termi
 
 ---
 
-### 6.2 Feature literals
+### 6.2 Feature bundle literals
 
 ```
-(lit <polarity> <feature>)
+(bundle (<polarity> <feature>) ...)
 ```
 
-Evaluates to a **singleton feature bundle** containing exactly one feature specification.
+Evaluates to a **feature bundle** containing the listed feature specifications.
 
 Examples:
 
 ```
-(lit + voice)        ⇒ { (+, voice) }
-(lit - consonantal) ⇒ { (-, consonantal) }
+(bundle (+ voice))        ⇒ { (+, voice) }
+(bundle (- consonantal)) ⇒ { (-, consonantal) }
 ```
 
 Semantics:
 
+* Each entry is a pair of the form `(<polarity> <feature>)`.
 * `<polarity>` must be either `+` or `-`.
 * `<feature>` must be a valid feature name in the alphabet.
-* The resulting bundle contains exactly one valued feature.
+* The resulting bundle contains exactly the listed valued features.
 
 Notes:
 
-* Literals are the primary way to introduce *new* feature values not copied from `INR` or `TRM`.
-* More complex bundles are constructed by composing literals with `unify`.
+* Bundles are the primary way to introduce *new* feature values not copied from `INR` or `TRM`.
+* More complex bundles are constructed by composing bundles with `unify`.
 
 Example:
 
 ```
 (unify
-  (lit + voice)
-  (lit - continuant))
+  (bundle (+ voice))
+  (bundle (- continuant)))
 ```
 
 ---
@@ -249,7 +250,7 @@ Example:
 ```
 (unify
   (subtract (proj TRM *) (proj TRM (voice)))
-  (lit + voice))
+  (bundle (+ voice)))
 ```
 
 ---
@@ -270,7 +271,7 @@ The language is **always strict**:
 
 * unknown operators → error
 * wrong arity → error
-* invalid polarity in `lit` → error
+* invalid polarity in `bundle` → error
 * unknown feature names → error
 
 Errors should be reported with context (operator name, argument position).
@@ -283,7 +284,7 @@ Errors should be reported with context (operator name, argument position).
 * Evaluation is recursive and deterministic
 * The interpreter does not execute code and cannot escape its defined semantics
 * The evaluator is parameterized by the **alphabet feature universe** (the set of all valid feature names)
-* During evaluation of `(proj …)` and `(lit …)`, all referenced feature names are validated against this universe; use of an undefined feature results in an error
+* During evaluation of `(proj …)` and `(bundle …)`, all referenced feature names are validated against this universe; use of an undefined feature results in an error
 * Resolution from a feature bundle to a surface segment (and enforcement of uniqueness/strictness) is performed **outside** the DSL, by the surrounding rule-application or compilation logic
 
 ---
@@ -295,5 +296,5 @@ This design:
 * mirrors the lambda-style definitions used in formal S&C descriptions
 * avoids embedding executable code in config files
 * allows expressive, nested feature operations
-* supports direct construction of output features via literals
+* supports direct construction of output features via bundles
 * keeps the compiler pipeline simple, and keeps the config file readable

@@ -127,7 +127,7 @@ snc2fst init samples/
 ### Out DSL
 
 The `out` field is a tiny DSL that composes feature bundles from `INR` and `TRM`
-using `lit`, `proj`, `unify`, and `subtract`. It exists so rules can describe
+using `bundle`, `proj`, `unify`, and `subtract`. It exists so rules can describe
 the Out function declaratively without having to evaluate user-generated Python 
 or having a huge JSON schema that’s horrifying to look at.
 
@@ -136,13 +136,13 @@ Examples:
 ```
 (proj TRM (Voice))
 (unify (subtract (proj TRM *) (proj TRM (Voice))) (proj INR (Voice)))
-(lit - Voice)
+(bundle (- Voice))
 ```
 
 Signatures:
 
 ```
-(lit <+|-> <Feature>)
+(bundle (<+|-> <Feature>) ...)
 (proj <INR|TRM|expr> (<Feature> ...|*))
 (unify <expr> <expr>)
 (subtract <expr> <expr>)

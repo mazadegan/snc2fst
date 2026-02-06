@@ -171,7 +171,7 @@ def test_validate_rules_unknown_out_feature(tmp_path: Path) -> None:
                 "inr": [["+","Voice"]],
                 "trm": [],
                 "cnd": [],
-                "out": "(lit + Continuant)",
+                "out": "(bundle (+ Continuant))",
             }
         ]
     }
