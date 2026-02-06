@@ -191,6 +191,8 @@ of them. In that case, `output` is treated as a directory and each rule is
 written as `{rule_id}.att`, `{rule_id}.sym`, and (if `--fst` is set)
 `{rule_id}.fst`.
 
+`compile` requires `--alphabet`.
+
 Show progress bar when generating large FSTs:
 
 ```
