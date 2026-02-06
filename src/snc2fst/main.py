@@ -898,6 +898,17 @@ def _evaluate_with_reference(
             evaluated = evaluate_rule_on_bundles_with_order(
                 rule, bundles, v_order
             )
+            v_set = set(v_order)
+            reconstructed: list[dict[str, str]] = []
+            for input_bundle, out_bundle in zip(bundles, evaluated):
+                recon = {
+                    feature: value
+                    for feature, value in input_bundle.items()
+                    if feature not in v_set
+                }
+                recon.update(out_bundle)
+                reconstructed.append(recon)
+            evaluated = reconstructed
         output_syms: list[object] = []
         for bundle in evaluated:
             bundle_key = tuple(

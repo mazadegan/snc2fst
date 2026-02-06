@@ -79,3 +79,46 @@ def test_evaluate_with_pynini_matches_reference_small() -> None:
         strict=True,
     )
     assert output == [["d", "b", "c", "a"]]
+
+
+def test_evaluate_with_pynini_reconstructs_non_v_features() -> None:
+    rule = Rule(
+        id="r_recon",
+        dir="LEFT",
+        inr=[],
+        trm=[["+","Voice"]],
+        cnd=[],
+        out="(proj TRM (Voice))",
+    )
+    alphabet = {
+        "symbols": ["a", "b", "c", "d"],
+        "features": ["Voice", "F1"],
+        "values": [
+            ["+", "-", "+", "-"],
+            ["+", "+", "-", "-"],
+        ],
+    }
+    feature_order = tuple(alphabet["features"])
+    symbol_to_bundle = {
+        sym: {
+            feature: value
+            for feature, value in zip(feature_order, row)
+            if value != "0"
+        }
+        for sym, row in zip(alphabet["symbols"], zip(*alphabet["values"]))
+    }
+    bundle_to_symbol = {}
+    for sym, bundle in symbol_to_bundle.items():
+        key = tuple(bundle.get(feature, "0") for feature in feature_order)
+        bundle_to_symbol[key] = sym
+
+    words = [["a", "d"]]
+    output = evaluate_with_pynini(
+        rule=rule,
+        words=words,
+        feature_order=feature_order,
+        symbol_to_bundle=symbol_to_bundle,
+        bundle_to_symbol=bundle_to_symbol,
+        strict=True,
+    )
+    assert output == [["a", "c"]]

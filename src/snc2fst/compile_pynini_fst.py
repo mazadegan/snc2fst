@@ -206,6 +206,7 @@ def evaluate_with_pynini(
             )
         word_symbols = word[::-1] if rule.dir == "RIGHT" else word
         input_labels: list[int] = []
+        input_bundles: list[dict[str, str]] = []
         for sym in word_symbols:
             if not isinstance(sym, str) or not sym.strip():
                 raise typer.BadParameter(
@@ -216,6 +217,7 @@ def evaluate_with_pynini(
                     f"Word {idx} has unknown symbol: {sym!r}"
                 )
             bundle = symbol_to_bundle[sym]
+            input_bundles.append(bundle)
             input_labels.append(
                 _encode_tv_label(_bundle_to_tv_tuple(bundle, v_order))
             )
@@ -224,13 +226,33 @@ def evaluate_with_pynini(
         composed = fst.compose(input_fst, fst_machine)
         output_fst = fst.shortestpath(composed)
         output_labels = _pynini_output_labels(output_fst)
-        output_syms = _labels_to_alphabet(
-            output_labels,
-            v_order,
-            feature_order,
-            bundle_to_symbol,
-            strict,
-        )
+        if len(output_labels) != len(input_bundles):
+            raise typer.BadParameter(
+                "Pynini output length does not match input length."
+            )
+        v_set = set(v_order)
+        output_syms: list[object] = []
+        for label, input_bundle in zip(output_labels, input_bundles):
+            v_bundle = _tv_tuple_to_bundle(
+                _decode_tv_label(label, len(v_order)), v_order
+            )
+            recon_bundle = {
+                feature: value
+                for feature, value in input_bundle.items()
+                if feature not in v_set
+            }
+            recon_bundle.update(v_bundle)
+            bundle_key = tuple(
+                recon_bundle.get(feature, "0") for feature in feature_order
+            )
+            if bundle_key not in bundle_to_symbol:
+                if strict:
+                    raise typer.BadParameter(
+                        f"Output bundle has no symbol: {bundle_key}"
+                    )
+                output_syms.append(recon_bundle)
+            else:
+                output_syms.append(bundle_to_symbol[bundle_key])
         if rule.dir == "RIGHT":
             output_syms = list(reversed(output_syms))
         output_words.append(output_syms)
