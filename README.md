@@ -183,13 +183,19 @@ snc2fst compile samples/rules.json samples/rule.att --alphabet samples/alphabet.
 Compile and also emit a binary FST (requires `pynini`):
 
 ```
-snc2fst compile samples/rules.json samples/rule.att --alphabet samples/alphabet.csv --pynini samples/rule.fst
+snc2fst compile samples/rules.json samples/rule.att --alphabet samples/alphabet.csv --fst samples/rule.fst
 ```
+
+When the rules file contains multiple rules, omit `--rule-id` to compile all
+of them. In that case, `output` is treated as a directory and each rule is
+written as `{rule_id}.att`, `{rule_id}.sym`, and (if `--fst` is set)
+`{rule_id}.fst`.
 
 Show progress bar when generating large FSTs:
 
 ```
 snc2fst compile samples/rules.json /tmp/rule.att --alphabet samples/alphabet.csv --progress
+snc2fst compile samples/rules.json /tmp/rule.att --alphabet samples/alphabet.csv -p
 ```
 
 Guard against accidental blow‑ups (default --max-arcs is 5 million):

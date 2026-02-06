@@ -373,9 +373,9 @@ def compile_rule(
     ),
     output: Path = typer.Argument(
         ...,
-        dir_okay=False,
+        dir_okay=True,
         writable=True,
-        help="AT&T output path (ignored when --no-att is set).",
+        help="AT&T output path (file for single rule, directory for multiple).",
     ),
     rule_id: str | None = typer.Option(
         None,
@@ -397,12 +397,12 @@ def compile_rule(
         writable=True,
         help="Symbol table output path (defaults next to output).",
     ),
-    pynini_fst: Path | None = typer.Option(
+    fst_path: Path | None = typer.Option(
         None,
-        "--pynini",
-        dir_okay=False,
+        "--fst",
+        dir_okay=True,
         writable=True,
-        help="Write a compiled FST binary using Pynini.",
+        help="Write a compiled FST binary using Pynini (file for single rule, directory for multiple).",
     ),
     max_arcs: int = typer.Option(
         5_000_000,
@@ -413,6 +413,7 @@ def compile_rule(
     progress: bool = typer.Option(
         False,
         "--progress",
+        "-p",
         help="Show a progress bar during compilation.",
     ),
 ) -> None:
@@ -449,46 +450,91 @@ def compile_rule(
                     f"Rule {rule.id} out is invalid: {exc}"
                 ) from exc
 
-    rule = _select_rule(rules, rule_id)
-    _enforce_arc_limit(rule, max_arcs, alphabet_features=features)
-    v_features = (
-        compute_v_features(rule, alphabet_features=features)
-        if features is not None
-        else None
-    )
-    p_features = (
-        compute_p_features(rule, alphabet_features=features)
-        if features is not None
-        else None
-    )
-    machine = compile_pynini_fst(
-        rule,
-        show_progress=progress,
-        v_features=v_features,
-        p_features=p_features,
-    )
-    if progress:
-        typer.echo("writing output...")
-
-    if symtab is not None:
-        symtab_path = symtab
+    if rule_id is not None:
+        selected_rules = [_select_rule(rules, rule_id)]
     else:
-        symtab_path = output.with_suffix(".sym")
-    write_att_pynini(machine, output, symtab_path=symtab_path)
-    if pynini_fst is not None:
-        machine.fst.write(str(pynini_fst))
-    arc_count = 0
-    for state in machine.fst.states():
-        arc_count += sum(1 for _ in machine.fst.arcs(state))
-    state_count = machine.fst.num_states()
-    symtab_display = symtab_path
-    typer.echo(
-        f"done. states={state_count} arcs={arc_count}"
-    )
-    typer.echo(f"att: {output}")
-    typer.echo(f"symtab: {symtab_display}")
-    if pynini_fst is not None:
-        typer.echo(f"fst: {pynini_fst}")
+        selected_rules = list(rules)
+
+    if len(selected_rules) > 1:
+        if output.suffix:
+            raise typer.BadParameter(
+                "When compiling multiple rules, output must be a directory."
+            )
+        output_dir = output
+        output_dir.mkdir(parents=True, exist_ok=True)
+        if symtab is not None:
+            raise typer.BadParameter(
+                "--symtab is only valid when compiling a single rule."
+            )
+        fst_dir = output_dir
+        if fst_path is not None:
+            if fst_path.suffix:
+                raise typer.BadParameter(
+                    "When compiling multiple rules, --fst must be a directory."
+                )
+            fst_dir = fst_path
+            fst_dir.mkdir(parents=True, exist_ok=True)
+    else:
+        output_dir = None
+        fst_dir = None
+        if output.exists() and output.is_dir():
+            raise typer.BadParameter(
+                "When compiling a single rule, output must be a file path."
+            )
+
+    total_rules = len(selected_rules)
+    for idx, rule in enumerate(selected_rules, start=1):
+        if total_rules > 1:
+            typer.echo(
+                f"[{idx}/{total_rules}] compiling {rule.id}..."
+            )
+        _enforce_arc_limit(rule, max_arcs, alphabet_features=features)
+        v_features = (
+            compute_v_features(rule, alphabet_features=features)
+            if features is not None
+            else None
+        )
+        p_features = (
+            compute_p_features(rule, alphabet_features=features)
+            if features is not None
+            else None
+        )
+        machine = compile_pynini_fst(
+            rule,
+            show_progress=progress,
+            v_features=v_features,
+            p_features=p_features,
+        )
+        if progress:
+            typer.echo("writing output...")
+
+        if output_dir is None:
+            att_path = output
+        else:
+            att_path = output_dir / f"{rule.id}.att"
+        if symtab is not None and output_dir is None:
+            symtab_path = symtab
+        else:
+            symtab_path = att_path.with_suffix(".sym")
+        write_att_pynini(machine, att_path, symtab_path=symtab_path)
+        if fst_path is not None:
+            if output_dir is None:
+                machine.fst.write(str(fst_path))
+                fst_out = fst_path
+            else:
+                fst_out = fst_dir / f"{rule.id}.fst"
+                machine.fst.write(str(fst_out))
+        arc_count = 0
+        for state in machine.fst.states():
+            arc_count += sum(1 for _ in machine.fst.arcs(state))
+        state_count = machine.fst.num_states()
+        typer.echo(
+            f"done. states={state_count} arcs={arc_count}"
+        )
+        typer.echo(f"att: {att_path}")
+        typer.echo(f"symtab: {symtab_path}")
+        if fst_path is not None:
+            typer.echo(f"fst: {fst_out}")
 
 
 @app.command("eval")
