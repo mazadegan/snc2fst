@@ -1,6 +1,8 @@
-CLI Reference
-=============
+snc2fst Documentation
+=====================
 
-.. click:: snc2fst.cli_docs:cli
-   :prog: snc2fst
-   :nested: full
+.. toctree::
+   :maxdepth: 2
+
+   tutorial
+   cli

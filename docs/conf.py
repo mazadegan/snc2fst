@@ -15,7 +15,11 @@ exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 
 html_theme = "alabaster"
 html_theme_options = {
-    "nosidebar": True,
+    "fixed_sidebar": True,
+    "show_powered_by": True,
+    "extra_nav_links": {
+        "GitHub": "https://github.com/mazadegan/snc2fst",
+    },
 }
 html_static_path = ["_static"]
 
