@@ -135,7 +135,7 @@ Examples:
 
 ```
 (proj TRM (Voice))
-(unify (subtract TRM (proj TRM (Voice))) (proj INR (Voice)))
+(unify (subtract (proj TRM *) (proj TRM (Voice))) (proj INR (Voice)))
 (lit - Voice)
 ```
 
@@ -143,18 +143,17 @@ Signatures:
 
 ```
 (lit <+|-> <Feature>)
-(proj <INR|TRM|expr> (<Feature> ...))
-(expand <INR|TRM|expr>)
+(proj <INR|TRM|expr> (<Feature> ...|*))
 (unify <expr> <expr>)
 (subtract <expr> <expr>)
 ```
 
 Notes:
 
-- `INR`/`TRM` cannot appear bare; wrap them in `(expand ...)` to use a full bundle
-  or `(proj ...)` to select features explicitly.
-- `(expand TRM)` expands V and P to the full alphabet feature set (larger FST).
-- `(expand INR)` expands V to the full alphabet feature set.
+- Bare `INR`/`TRM` are allowed and refer to the restricted bundle over `V`.
+- Use `(proj ...)` to select features explicitly.
+- `(proj TRM *)` expands V and P to the full alphabet feature set (larger FST).
+- `(proj INR *)` expands V to the full alphabet feature set.
 
 ### Validate files
 

@@ -14,7 +14,7 @@ def test_evaluate_out_dsl_complex_expression() -> None:
     features = {"Voice", "Consonantal", "Continuant"}
     inr = {"Voice": "+", "Consonantal": "-"}
     trm = {"Voice": "-", "Continuant": "+"}
-    expr = "(unify (subtract (expand TRM) (proj TRM (Voice))) (proj INR (Voice)))"
+    expr = "(unify (subtract (proj TRM *) (proj TRM (Voice))) (proj INR (Voice)))"
 
     result = evaluate_out_dsl(expr, inr=inr, trm=trm, features=features)
 
@@ -78,3 +78,14 @@ def test_evaluate_out_dsl_subtract_arbitrary_bundle() -> None:
     result = evaluate_out_dsl(expr, inr=inr, trm=trm, features=features)
 
     assert result == {"Consonantal": "-"}
+
+
+def test_evaluate_out_dsl_bare_inr() -> None:
+    features = {"F1", "F2"}
+    inr = {"F1": "-", "F2": "+"}
+    trm = {}
+    expr = "(unify INR (lit + F1))"
+
+    result = evaluate_out_dsl(expr, inr=inr, trm=trm, features=features)
+
+    assert result == {"F1": "-", "F2": "+"}

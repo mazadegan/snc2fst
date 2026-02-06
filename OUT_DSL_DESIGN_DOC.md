@@ -45,6 +45,7 @@ At rule-application time, the evaluator is given:
 
 * `INR`: a feature bundle (the search initiator)
 * `TRM`: a feature bundle (the search terminator)
+* Bare `INR`/`TRM` refer to the restricted bundle over `V`.
 
 These are the *only* bound identifiers.
 
@@ -84,7 +85,8 @@ The empty bundle `∅` represents complete underspecification (all features `0`)
 
 ### 4.2 Feature list
 
-A feature list is a list of feature names (used as the second argument to `proj`).
+A feature list is a list of feature names (used as the second argument to `proj`),
+or the special token `*` to project all features in the full alphabet.
 
 ---
 
@@ -163,7 +165,7 @@ Example:
 ### 6.3 Projection
 
 ```
-(proj <bundle-expr> (<feature>...))
+(proj <bundle-expr> (<feature>...|*))
 ```
 
 Evaluates to a feature bundle consisting of only the listed features, with values taken from the evaluated bundle expression.
@@ -246,7 +248,7 @@ Example:
 
 ```
 (unify
-  (subtract TRM (proj TRM (voice)))
+  (subtract (proj TRM *) (proj TRM (voice)))
   (lit + voice))
 ```
 

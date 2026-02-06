@@ -32,13 +32,13 @@ def test_extract_trm_dependent_features_proj_trm() -> None:
 
 
 def test_extract_trm_dependent_features_lit_with_trm() -> None:
-    expr = "(unify (expand TRM) (lit + Voice))"
+    expr = "(unify (proj TRM *) (lit + Voice))"
 
     assert extract_trm_dependent_features(expr) == {"Voice"}
 
 
 def test_extract_trm_dependent_features_ignores_inr_only() -> None:
-    expr = "(unify (expand TRM) (proj INR (Voice)))"
+    expr = "(unify (proj TRM *) (proj INR (Voice)))"
 
     assert extract_trm_dependent_features(expr) == set()
 
@@ -80,21 +80,23 @@ def test_compute_p_features_matches_out_dsl_analysis() -> None:
         inr=[],
         trm=[],
         cnd=[],
-        out="(unify (expand TRM) (lit + Voice))",
+        out="(unify (proj TRM *) (lit + Voice))",
     )
 
     assert compute_p_features(rule) == {"Voice"}
 
 
 def test_out_uses_all_detects_operator() -> None:
-    assert out_uses_all_trm("(expand TRM)") is True
-    assert out_uses_all_trm("(unify (expand TRM) (lit + Voice))") is True
-    assert out_uses_all_trm("(expand INR)") is False
+    assert out_uses_all_trm("(proj TRM *)") is True
+    assert out_uses_all_trm("(unify (proj TRM *) (lit + Voice))") is True
+    assert out_uses_all_trm("(proj INR *)") is False
     assert out_uses_all_trm("(proj TRM (Voice))") is False
-    assert out_uses_all_inr("(expand INR)") is True
-    assert out_uses_all_inr("(unify (expand INR) (lit + Voice))") is True
-    assert out_uses_all_inr("(expand TRM)") is False
+    assert out_uses_all_inr("(proj INR *)") is True
+    assert out_uses_all_inr("(unify (proj INR *) (lit + Voice))") is True
+    assert out_uses_all_inr("(proj TRM *)") is False
     assert out_uses_all_inr("(proj INR (Voice))") is False
+    assert out_uses_all_inr("INR") is False
+    assert out_uses_all_trm("TRM") is False
 
 
 def test_compute_features_all_uses_alphabet() -> None:
@@ -104,7 +106,7 @@ def test_compute_features_all_uses_alphabet() -> None:
         inr=[("+", "Voice")],
         trm=[],
         cnd=[],
-        out="(expand TRM)",
+        out="(proj TRM *)",
     )
     alphabet_features = {"Voice", "Continuant", "Nasal"}
 
@@ -123,7 +125,7 @@ def test_compute_features_all_inr_expands_v_only() -> None:
         inr=[("+", "Voice")],
         trm=[],
         cnd=[],
-        out="(expand INR)",
+        out="(proj INR *)",
     )
     alphabet_features = {"Voice", "Continuant", "Nasal"}
 
@@ -141,10 +143,11 @@ def test_extract_out_features_rejects_unknown_atom() -> None:
 
 
 def test_out_uses_full_trm_detects_unprojected_trm() -> None:
-    assert out_uses_full_trm("(expand TRM)") is True
-    assert out_uses_full_trm("(unify (expand TRM) (lit + Voice))") is True
+    assert out_uses_full_trm("TRM") is True
+    assert out_uses_full_trm("(proj TRM *)") is True
+    assert out_uses_full_trm("(unify (proj TRM *) (lit + Voice))") is True
     assert out_uses_full_trm(
-        "(subtract (expand TRM) (proj TRM (Voice)))"
+        "(subtract (proj TRM *) (proj TRM (Voice)))"
     ) is True
     assert out_uses_full_trm("(proj TRM (Voice))") is False
     assert out_uses_full_trm("(unify (proj TRM (Voice)) (lit + Voice))") is False
@@ -157,7 +160,7 @@ def test_compute_p_features_full_trm_falls_back_to_v() -> None:
         inr=[("+", "Voice")],
         trm=[],
         cnd=[("-", "Nasal")],
-        out="(subtract (expand TRM) (proj TRM (Voice)))",
+        out="(subtract (proj TRM *) (proj TRM (Voice)))",
     )
 
     assert compute_p_features(rule) == compute_v_features(rule)
