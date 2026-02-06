@@ -16,3 +16,6 @@ wheels/
 *.att
 *.fst
 *.sym
+
+# Sphinx build output
+docs/_build/
