@@ -382,8 +382,8 @@ def compile_rule(
         "--rule-id",
         help="Rule id to compile (required if multiple rules).",
     ),
-    alphabet: Path | None = typer.Option(
-        None,
+    alphabet: Path = typer.Option(
+        ...,
         "--alphabet",
         "-a",
         dir_okay=False,
@@ -397,12 +397,13 @@ def compile_rule(
         writable=True,
         help="Symbol table output path (defaults next to output).",
     ),
-    fst_path: Path | None = typer.Option(
-        None,
+    fst: bool = typer.Option(
+        False,
         "--fst",
-        dir_okay=True,
-        writable=True,
-        help="Write a compiled FST binary using Pynini (file for single rule, directory for multiple).",
+        help=(
+            "Write a compiled FST binary using Pynini "
+            "(uses output path/dir)."
+        ),
     ),
     max_arcs: int = typer.Option(
         5_000_000,
@@ -431,24 +432,22 @@ def compile_rule(
 
     from .feature_analysis import compute_p_features, compute_v_features
 
-    features: set[str] | None = None
-    if alphabet is not None:
-        features = _load_alphabet_features(alphabet)
-        for rule in rules:
-            _validate_rule_features(rule, features, "inr")
-            _validate_rule_features(rule, features, "trm")
-            _validate_rule_features(rule, features, "cnd")
-            try:
-                evaluate_out_dsl(
-                    rule.out,
-                    inr=_bundle_from_rule(rule, "inr"),
-                    trm=_bundle_from_rule(rule, "trm"),
-                    features=features,
-                )
-            except OutDslError as exc:
-                raise typer.BadParameter(
-                    f"Rule {rule.id} out is invalid: {exc}"
-                ) from exc
+    features = _load_alphabet_features(alphabet)
+    for rule in rules:
+        _validate_rule_features(rule, features, "inr")
+        _validate_rule_features(rule, features, "trm")
+        _validate_rule_features(rule, features, "cnd")
+        try:
+            evaluate_out_dsl(
+                rule.out,
+                inr=_bundle_from_rule(rule, "inr"),
+                trm=_bundle_from_rule(rule, "trm"),
+                features=features,
+            )
+        except OutDslError as exc:
+            raise typer.BadParameter(
+                f"Rule {rule.id} out is invalid: {exc}"
+            ) from exc
 
     if rule_id is not None:
         selected_rules = [_select_rule(rules, rule_id)]
@@ -466,17 +465,8 @@ def compile_rule(
             raise typer.BadParameter(
                 "--symtab is only valid when compiling a single rule."
             )
-        fst_dir = output_dir
-        if fst_path is not None:
-            if fst_path.suffix:
-                raise typer.BadParameter(
-                    "When compiling multiple rules, --fst must be a directory."
-                )
-            fst_dir = fst_path
-            fst_dir.mkdir(parents=True, exist_ok=True)
     else:
         output_dir = None
-        fst_dir = None
         if output.exists() and output.is_dir():
             raise typer.BadParameter(
                 "When compiling a single rule, output must be a file path."
@@ -489,16 +479,8 @@ def compile_rule(
                 f"[{idx}/{total_rules}] compiling {rule.id}..."
             )
         _enforce_arc_limit(rule, max_arcs, alphabet_features=features)
-        v_features = (
-            compute_v_features(rule, alphabet_features=features)
-            if features is not None
-            else None
-        )
-        p_features = (
-            compute_p_features(rule, alphabet_features=features)
-            if features is not None
-            else None
-        )
+        v_features = compute_v_features(rule, alphabet_features=features)
+        p_features = compute_p_features(rule, alphabet_features=features)
         machine = compile_pynini_fst(
             rule,
             show_progress=progress,
@@ -517,12 +499,12 @@ def compile_rule(
         else:
             symtab_path = att_path.with_suffix(".sym")
         write_att_pynini(machine, att_path, symtab_path=symtab_path)
-        if fst_path is not None:
+        if fst:
             if output_dir is None:
-                machine.fst.write(str(fst_path))
-                fst_out = fst_path
+                fst_out = att_path.with_suffix(".fst")
+                machine.fst.write(str(fst_out))
             else:
-                fst_out = fst_dir / f"{rule.id}.fst"
+                fst_out = output_dir / f"{rule.id}.fst"
                 machine.fst.write(str(fst_out))
         arc_count = 0
         for state in machine.fst.states():
@@ -533,7 +515,7 @@ def compile_rule(
         )
         typer.echo(f"att: {att_path}")
         typer.echo(f"symtab: {symtab_path}")
-        if fst_path is not None:
+        if fst:
             typer.echo(f"fst: {fst_out}")
 
 

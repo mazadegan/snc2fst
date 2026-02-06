@@ -183,7 +183,7 @@ snc2fst compile samples/rules.json samples/rule.att --alphabet samples/alphabet.
 Compile and also emit a binary FST (requires `pynini`):
 
 ```
-snc2fst compile samples/rules.json samples/rule.att --alphabet samples/alphabet.csv --fst samples/rule.fst
+snc2fst compile samples/rules.json samples/rule.att --alphabet samples/alphabet.csv --fst
 ```
 
 When the rules file contains multiple rules, omit `--rule-id` to compile all
@@ -208,6 +208,16 @@ snc2fst compile samples/rules.json /tmp/rule.att --alphabet samples/alphabet.csv
 
 Input format is JSON: a list of words, each word is a list of segment symbols
 from the alphabet.
+
+### Build CLI docs
+
+The CLI reference is built with Sphinx.
+
+```
+python -m pip install -e ".[docs]"
+# make sure to use the env python
+python -m sphinx -b html docs docs/_build/html
+```
 
 Example `input.json`:
 

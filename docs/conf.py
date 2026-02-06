@@ -17,7 +17,6 @@ html_theme = "alabaster"
 html_theme_options = {
     "nosidebar": True,
 }
-
 html_static_path = ["_static"]
 
 master_doc = "index"
