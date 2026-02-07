@@ -25,6 +25,7 @@ def _write_alphabet_csv(
 
 def test_compile_writes_att_and_symtab(tmp_path: Path) -> None:
     rules = {
+        "id": "rules",
         "rules": [
             {
                 "id": "spread_voice_right",
@@ -67,6 +68,7 @@ def test_compile_writes_att_and_symtab(tmp_path: Path) -> None:
 
 def test_compile_outputs_expected_att_and_symtab(tmp_path: Path) -> None:
     rules = {
+        "id": "rules",
         "rules": [
             {
                 "id": "identity_left",
@@ -133,6 +135,7 @@ def test_compile_outputs_expected_att_and_symtab(tmp_path: Path) -> None:
 
 def test_compile_respects_max_arcs(tmp_path: Path) -> None:
     rules = {
+        "id": "rules",
         "rules": [
             {
                 "id": "spread_voice_right",

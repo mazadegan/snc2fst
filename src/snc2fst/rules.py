@@ -30,10 +30,13 @@ class Rule(BaseModel):
 
 
 class RulesFile(BaseModel):
+    id: str
     rules: list[Rule] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _validate_rules(self) -> "RulesFile":
+        if not self.id.strip():
+            raise ValueError("Rules file id cannot be empty.")
         ids = [rule.id for rule in self.rules]
         seen: set[str] = set()
         dupes: list[str] = []

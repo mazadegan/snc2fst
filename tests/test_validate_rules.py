@@ -17,6 +17,7 @@ def test_validate_rules_json(tmp_path: Path) -> None:
     alphabet_path.write_text(alphabet_content, encoding="utf-8")
 
     rules = {
+        "id": "rules",
         "rules": [
             {
                 "id": "spread_voice_right",
@@ -93,6 +94,7 @@ def test_validate_rules_dump_vp(tmp_path: Path) -> None:
     alphabet_path.write_text(alphabet_content, encoding="utf-8")
 
     rules = {
+        "id": "rules",
         "rules": [
             {
                 "id": "spread_voice_right",
@@ -129,6 +131,7 @@ def test_validate_rules_fst_stats(tmp_path: Path) -> None:
     alphabet_path.write_text(alphabet_content, encoding="utf-8")
 
     rules = {
+        "id": "rules",
         "rules": [
             {
                 "id": "spread_voice_right",
@@ -164,6 +167,7 @@ def test_validate_rules_unknown_out_feature(tmp_path: Path) -> None:
     alphabet_path.write_text(alphabet_content, encoding="utf-8")
 
     rules = {
+        "id": "rules",
         "rules": [
             {
                 "id": "bad_out",

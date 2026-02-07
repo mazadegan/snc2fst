@@ -63,6 +63,7 @@ def test_cli_smoke(tmp_path: Path) -> None:
             "eval",
             str(rules),
             str(inputs),
+            "--output",
             str(out_path),
             "--alphabet",
             str(alphabet),
@@ -72,4 +73,8 @@ def test_cli_smoke(tmp_path: Path) -> None:
     )
     assert result.exit_code == 0, result.output
     payload = json.loads(out_path.read_text(encoding="utf-8"))
-    assert isinstance(payload, list)
+    assert isinstance(payload, dict)
+    assert payload.get("id") == "sample_rules"
+    assert "inputs" in payload
+    assert "rows" in payload
+    assert payload["rows"]

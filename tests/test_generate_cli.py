@@ -26,6 +26,7 @@ def test_init_creates_sample_files(tmp_path: Path) -> None:
     assert input_path.exists()
 
     rules = json.loads(rules_path.read_text(encoding="utf-8"))
+    assert "id" in rules
     assert "rules" in rules
     assert len(rules["rules"]) == 1
     input_payload = json.loads(input_path.read_text(encoding="utf-8"))

@@ -14,6 +14,7 @@ from snc2fst.main import app
 
 def test_eval_cli_outputs_json(tmp_path: Path) -> None:
     rules = {
+        "id": "rules",
         "rules": [
             {
                 "id": "spread_voice_right",
@@ -48,6 +49,7 @@ def test_eval_cli_outputs_json(tmp_path: Path) -> None:
             "eval",
             str(rules_path),
             str(input_path),
+            "--output",
             str(output_path),
             "--alphabet",
             str(alphabet_path),
@@ -55,11 +57,21 @@ def test_eval_cli_outputs_json(tmp_path: Path) -> None:
     )
     assert result.exit_code == 0, result.output
     output = json.loads(output_path.read_text(encoding="utf-8"))
-    assert output == [["d", "b", "c"]]
+    assert output == {
+        "id": "rules",
+        "inputs": [["a", "b", "c"]],
+        "rows": [
+            {
+                "rule_id": "spread_voice_right",
+                "outputs": [["d", "b", "c"]],
+            }
+        ],
+    }
 
 
 def test_eval_cli_non_strict_emits_bundle(tmp_path: Path) -> None:
     rules = {
+        "id": "rules",
         "rules": [
             {
                 "id": "spread_voice_right",
@@ -94,6 +106,7 @@ def test_eval_cli_non_strict_emits_bundle(tmp_path: Path) -> None:
             "eval",
             str(rules_path),
             str(input_path),
+            "--output",
             str(output_path),
             "--alphabet",
             str(alphabet_path),
@@ -101,11 +114,21 @@ def test_eval_cli_non_strict_emits_bundle(tmp_path: Path) -> None:
     )
     assert result.exit_code == 0, result.output
     output = json.loads(output_path.read_text(encoding="utf-8"))
-    assert output == [[{"Voice": "-"}, "b", "c"]]
+    assert output == {
+        "id": "rules",
+        "inputs": [["a", "b", "c"]],
+        "rows": [
+            {
+                "rule_id": "spread_voice_right",
+                "outputs": [[{"Voice": "-"}, "b", "c"]],
+            }
+        ],
+    }
 
 
 def test_eval_cli_compare_requires_backend(tmp_path: Path) -> None:
     rules = {
+        "id": "rules",
         "rules": [
             {
                 "id": "spread_voice_left",
@@ -140,6 +163,7 @@ def test_eval_cli_compare_requires_backend(tmp_path: Path) -> None:
             "eval",
             str(rules_path),
             str(input_path),
+            "--output",
             str(output_path),
             "--alphabet",
             str(alphabet_path),
@@ -153,6 +177,7 @@ def test_eval_cli_compare_requires_backend(tmp_path: Path) -> None:
 def test_eval_cli_pynini_compare_right_rule(tmp_path: Path) -> None:
     pytest.importorskip("pywrapfst")
     rules = {
+        "id": "rules",
         "rules": [
             {
                 "id": "spread_voice_right",
@@ -187,6 +212,7 @@ def test_eval_cli_pynini_compare_right_rule(tmp_path: Path) -> None:
             "eval",
             str(rules_path),
             str(input_path),
+            "--output",
             str(output_path),
             "--alphabet",
             str(alphabet_path),
@@ -199,6 +225,7 @@ def test_eval_cli_pynini_compare_right_rule(tmp_path: Path) -> None:
 
 def test_eval_cli_dump_vp(tmp_path: Path) -> None:
     rules = {
+        "id": "rules",
         "rules": [
             {
                 "id": "spread_voice_right",
@@ -233,6 +260,7 @@ def test_eval_cli_dump_vp(tmp_path: Path) -> None:
             "eval",
             str(rules_path),
             str(input_path),
+            "--output",
             str(output_path),
             "--alphabet",
             str(alphabet_path),

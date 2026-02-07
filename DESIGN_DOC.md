@@ -85,6 +85,7 @@ A rules file will look like this:
 
 ```json
 {
+  "id": "rules_id",
   "rules": [
     {
         "id": "spread_voice_right",

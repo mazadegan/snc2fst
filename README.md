@@ -111,6 +111,7 @@ snc2fst init samples/
 
 ```json
 {
+  "id": "sample_rules",
   "rules": [
     {
       "id": "spread_f1_right",
@@ -211,6 +212,24 @@ snc2fst compile samples/rules.json /tmp/rule.att --alphabet samples/alphabet.csv
 Input format is JSON: a list of words, each word is a list of segment symbols
 from the alphabet.
 
+Rules files include a top-level `id` plus a `rules` array:
+
+```json
+{
+  "id": "rules_id",
+  "rules": [
+    {
+      "id": "rule_1",
+      "dir": "LEFT",
+      "inr": [],
+      "trm": [],
+      "cnd": [],
+      "out": "(subtract INR (proj INR (F1)))"
+    }
+  ]
+}
+```
+
 ### Build CLI docs
 
 The CLI reference is built with Sphinx.
@@ -241,36 +260,79 @@ Example `output.json` (default):
 ]
 ```
 
+By default, `eval` applies **all rules in order**, feeding each rule's output
+into the next rule's input. Use `--rule-id` to evaluate a single rule.
+
+The output is a table with the original inputs and one row per rule:
+
+```json
+{
+  "id": "rules_id",
+  "inputs": [["0", "A"], ["B"]],
+  "rows": [
+    {"rule_id": "rule_1", "outputs": [["0", "A"], ["B"]]}
+  ]
+}
+```
+
 Example with `--include-input`:
 
 ```json
-[
-  {"input": ["0", "A", "B", "C", "D"], "output": ["D", "A", "B", "C", "D"]},
-  {"input": ["J", "K", "L"], "output": ["J", "K", "L"]},
-  {"input": ["T", "U", "V", "W", "X", "Y", "Z"], "output": ["T", "U", "V", "W", "X", "Y", "Z"]}
-]
+{
+  "id": "rules_id",
+  "inputs": [
+    ["0", "A", "B", "C", "D"],
+    ["J", "K", "L"],
+    ["T", "U", "V", "W", "X", "Y", "Z"]
+  ],
+  "rows": [
+    {
+      "rule_id": "spread_f1_right",
+      "input": [
+        ["0", "A", "B", "C", "D"],
+        ["J", "K", "L"],
+        ["T", "U", "V", "W", "X", "Y", "Z"]
+      ],
+      "output": [
+        ["D", "A", "B", "C", "D"],
+        ["J", "K", "L"],
+        ["T", "U", "V", "W", "X", "Y", "Z"]
+      ]
+    }
+  ]
+}
 ```
 
 ```
-snc2fst eval samples/rules.json samples/input.json samples/out.json --alphabet samples/alphabet.csv
+snc2fst eval samples/rules.json samples/input.json --alphabet samples/alphabet.csv --output samples/out.json
 ```
+
+If `--output` is omitted, the default is `<rules_id>.out.<format>` next to the rules file.
 
 Include input + output in the result:
 
 ```
-snc2fst eval samples/rules.json samples/input.json samples/out.json --alphabet samples/alphabet.csv --include-input
+snc2fst eval samples/rules.json samples/input.json --alphabet samples/alphabet.csv --output samples/out.json --include-input
 ```
 
 Strict symbol mapping (error if output bundle has no matching symbol in alphabet):
 
 ```
-snc2fst eval samples/rules.json samples/input.json samples/out.json --alphabet samples/alphabet.csv --strict
+snc2fst eval samples/rules.json samples/input.json --alphabet samples/alphabet.csv --output samples/out.json --strict
 ```
 
 Use the Pynini backend and compare to the reference evaluator (`--compare` requires `--pynini`):
 
 ```
-snc2fst eval samples/rules.json samples/input.json samples/out.json --alphabet samples/alphabet.csv --pynini --compare
+snc2fst eval samples/rules.json samples/input.json --alphabet samples/alphabet.csv --output samples/out.json --pynini --compare
+```
+
+Select an output format (default: `json`):
+
+```
+snc2fst eval samples/rules.json samples/input.json --alphabet samples/alphabet.csv --format txt
+snc2fst eval samples/rules.json samples/input.json --alphabet samples/alphabet.csv --format csv
+snc2fst eval samples/rules.json samples/input.json --alphabet samples/alphabet.csv --format tsv
 ```
 
 ### Inspect V and P
@@ -278,7 +340,7 @@ snc2fst eval samples/rules.json samples/input.json samples/out.json --alphabet s
 Print the feature sets used to build the machine:
 
 ```
-snc2fst eval samples/rules.json samples/input.json samples/out.json --alphabet samples/alphabet.csv --dump-vp
+snc2fst eval samples/rules.json samples/input.json --alphabet samples/alphabet.csv --output samples/out.json --dump-vp
 snc2fst validate samples/rules.json --alphabet samples/alphabet.csv --dump-vp
 ```
 

@@ -35,6 +35,7 @@ def test_compile_pynini_fst_state_count() -> None:
 
 def test_evaluate_with_pynini_matches_reference_small() -> None:
     rules = {
+        "id": "rules",
         "rules": [
             {
                 "id": "spread_voice_right",

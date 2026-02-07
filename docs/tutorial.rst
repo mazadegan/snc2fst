@@ -68,13 +68,13 @@ Evaluate input words with the reference evaluator:
 
 .. code-block:: bash
 
-   snc2fst eval samples/rules.json samples/input.json samples/out.json --alphabet samples/alphabet.csv
+   snc2fst eval samples/rules.json samples/input.json --alphabet samples/alphabet.csv --output samples/out.json
 
 Use the Pynini backend and compare against the reference:
 
 .. code-block:: bash
 
-   snc2fst eval samples/rules.json samples/input.json samples/out.json --alphabet samples/alphabet.csv --pynini --compare
+   snc2fst eval samples/rules.json samples/input.json --alphabet samples/alphabet.csv --output samples/out.json --pynini --compare
 
 Out DSL Quick Reference
 -----------------------

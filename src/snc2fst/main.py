@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import io
 import json
 from pathlib import Path
 
@@ -169,7 +170,7 @@ def _validate_rule_features(
 
 def _validate_rules_file(
     rules_path: Path, alphabet_path: Path | None
-) -> list[Rule]:
+) -> RulesFile:
     payload = _load_json(rules_path)
 
     if alphabet_path is None:
@@ -180,10 +181,10 @@ def _validate_rules_file(
     features = _load_alphabet_features(alphabet_path)
 
     try:
-        rules = RulesFile.model_validate(payload).rules
+        rules_file = RulesFile.model_validate(payload)
     except ValidationError as exc:
         raise typer.BadParameter(format_validation_error(exc)) from exc
-    for rule in rules:
+    for rule in rules_file.rules:
         _validate_rule_features(rule, features, "inr")
         _validate_rule_features(rule, features, "trm")
         _validate_rule_features(rule, features, "cnd")
@@ -198,7 +199,7 @@ def _validate_rules_file(
             raise typer.BadParameter(
                 f"Rule {rule.id} out is invalid: {exc}"
             ) from exc
-    return rules
+    return rules_file
 
 
 def _validate_input_words(
@@ -310,7 +311,8 @@ def validate(
             kind_value = "alphabet"
 
     if kind_value == "rules":
-        rules = _validate_rules_file(input_path, alphabet)
+        rules_file = _validate_rules_file(input_path, alphabet)
+        rules = rules_file.rules
         if dump_vp or fst_stats:
             from .feature_analysis import compute_p_features, compute_v_features
             if alphabet is None:
@@ -426,9 +428,10 @@ def compile_rule(
     """
     payload = _load_json(rules_path)
     try:
-        rules = RulesFile.model_validate(payload).rules
+        rules_file = RulesFile.model_validate(payload)
     except ValidationError as exc:
         raise typer.BadParameter(format_validation_error(exc)) from exc
+    rules = rules_file.rules
 
     from .feature_analysis import compute_p_features, compute_v_features
 
@@ -535,11 +538,13 @@ def eval_rule(
         readable=True,
         help="Input JSON array of words (each word is an array of symbols).",
     ),
-    output: Path = typer.Argument(
-        ...,
+    output: Path | None = typer.Option(
+        None,
+        "--output",
+        "-o",
         dir_okay=False,
         writable=True,
-        help="Output JSON file for evaluated words.",
+        help="Output file for evaluated words (defaults to rules id).",
     ),
     rule_id: str | None = typer.Option(
         None,
@@ -557,7 +562,7 @@ def eval_rule(
     include_input: bool = typer.Option(
         False,
         "--include-input",
-        help="Include both input and output words in the result.",
+        help="Include per-rule input and output in the result table.",
     ),
     pynini: bool = typer.Option(
         False,
@@ -579,17 +584,25 @@ def eval_rule(
         "--dump-vp",
         help="Print V and P feature sets for debugging.",
     ),
+    output_format: str = typer.Option(
+        "json",
+        "--format",
+        help="Output format (json, txt, csv, tsv).",
+        show_choices=True,
+        case_sensitive=False,
+    ),
 ) -> None:
-    """Evaluate a rule against an input word list.
+    """Evaluate rules against an input word list.
 
     The compiled machine is canonical LEFT; RIGHT rules are evaluated by
     reversing input/output around the machine.
     """
     payload = _load_json(rules_path)
     try:
-        rules = RulesFile.model_validate(payload).rules
+        rules_file = RulesFile.model_validate(payload)
     except ValidationError as exc:
         raise typer.BadParameter(format_validation_error(exc)) from exc
+    rules = rules_file.rules
 
     if alphabet is None:
         raise typer.BadParameter(
@@ -614,22 +627,12 @@ def eval_rule(
                 f"Rule {rule.id} out is invalid: {exc}"
             ) from exc
 
-    rule = _select_rule(rules, rule_id)
     from .feature_analysis import compute_p_features, compute_v_features
 
-    alphabet_features = set(feature_order)
-    v_features = compute_v_features(rule, alphabet_features=alphabet_features)
-    p_features = compute_p_features(rule, alphabet_features=alphabet_features)
-    v_order = (
-        feature_order
-        if v_features == alphabet_features
-        else tuple(sorted(v_features))
-    )
-    if dump_vp:
-        v_features_sorted = sorted(v_features)
-        p_features_sorted = sorted(p_features)
-        typer.echo(f"V: {', '.join(v_features_sorted)}")
-        typer.echo(f"P: {', '.join(p_features_sorted)}")
+    if rule_id is not None:
+        selected_rules = [_select_rule(rules, rule_id)]
+    else:
+        selected_rules = list(rules)
     try:
         segments = json.loads(input_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
@@ -652,65 +655,140 @@ def eval_rule(
             )
         bundle_to_symbol[bundle_key] = row.symbol
 
-    output_words: list[list[object]] = []
-    results_with_input: list[dict[str, list[object]]] = []
+    if compare and not pynini:
+        raise typer.BadParameter("--compare requires --pynini.")
 
-    if pynini:
-        output_words = _evaluate_with_pynini(
-            rule=rule,
-            words=segments,
-            feature_order=feature_order,
-            symbol_to_bundle=symbol_to_bundle,
-            bundle_to_symbol=bundle_to_symbol,
-            strict=strict,
-            v_features=v_features,
-            p_features=p_features,
+    current_words = segments
+    table_rows: list[dict[str, object]] = []
+    alphabet_features = set(feature_order)
+
+    for rule in selected_rules:
+        v_features = compute_v_features(
+            rule, alphabet_features=alphabet_features
         )
-        if compare:
-            ref_words = _evaluate_with_reference(
+        p_features = compute_p_features(
+            rule, alphabet_features=alphabet_features
+        )
+        v_order = (
+            feature_order
+            if v_features == alphabet_features
+            else tuple(sorted(v_features))
+        )
+        if dump_vp:
+            v_features_sorted = sorted(v_features)
+            p_features_sorted = sorted(p_features)
+            typer.echo(f"{rule.id} V: {', '.join(v_features_sorted)}")
+            typer.echo(f"{rule.id} P: {', '.join(p_features_sorted)}")
+
+        if pynini:
+            output_words = _evaluate_with_pynini(
                 rule=rule,
-                words=segments,
+                words=current_words,
+                feature_order=feature_order,
+                symbol_to_bundle=symbol_to_bundle,
+                bundle_to_symbol=bundle_to_symbol,
+                strict=strict,
+                v_features=v_features,
+                p_features=p_features,
+            )
+            if compare:
+                ref_words = _evaluate_with_reference(
+                    rule=rule,
+                    words=current_words,
+                    feature_order=feature_order,
+                    symbol_to_bundle=symbol_to_bundle,
+                    bundle_to_symbol=bundle_to_symbol,
+                    strict=strict,
+                    v_order=v_order,
+                )
+                diffs = _diff_word_lists(ref_words, output_words)
+                if diffs:
+                    message = (
+                        "Pynini output differs from reference:\n"
+                        + "\n".join(diffs)
+                    )
+                    raise typer.BadParameter(message)
+        else:
+            output_words = _evaluate_with_reference(
+                rule=rule,
+                words=current_words,
                 feature_order=feature_order,
                 symbol_to_bundle=symbol_to_bundle,
                 bundle_to_symbol=bundle_to_symbol,
                 strict=strict,
                 v_order=v_order,
             )
-            diffs = _diff_word_lists(ref_words, output_words)
-            if diffs:
-                message = (
-                    "Pynini output differs from reference:\n"
-                    + "\n".join(diffs)
-                )
-                raise typer.BadParameter(message)
-        if include_input:
-            results_with_input = [
-                {"input": word, "output": output_word}
-                for word, output_word in zip(segments, output_words)
-            ]
-    else:
-        output_words = _evaluate_with_reference(
-            rule=rule,
-            words=segments,
-            feature_order=feature_order,
-            symbol_to_bundle=symbol_to_bundle,
-            bundle_to_symbol=bundle_to_symbol,
-            strict=strict,
-            v_order=v_order,
-        )
-        if include_input:
-            results_with_input = [
-                {"input": word, "output": output_word}
-                for word, output_word in zip(segments, output_words)
-            ]
-        if compare:
-            raise typer.BadParameter("--compare requires --pynini.")
 
-    if include_input:
-        rendered = _format_word_pairs(results_with_input)
+        if include_input:
+            table_rows.append(
+                {
+                    "rule_id": rule.id,
+                    "input": current_words,
+                    "output": output_words,
+                }
+            )
+        else:
+            table_rows.append(
+                {"rule_id": rule.id, "outputs": output_words}
+            )
+
+        current_words = output_words
+
+    table = {
+        "id": rules_file.id,
+        "inputs": segments,
+        "rows": table_rows,
+    }
+    output_format = output_format.lower()
+    valid_formats = {"json", "txt", "csv", "tsv"}
+    if output_format not in valid_formats:
+        raise typer.BadParameter(
+            "--format must be one of: " + ", ".join(sorted(valid_formats))
+        )
+    if output is None:
+        suffix = output_format if output_format != "json" else "json"
+        output = rules_path.with_name(f"{rules_file.id}.out.{suffix}")
+
+    if output_format == "json":
+        rendered = json.dumps(table, ensure_ascii=False, indent=2) + "\n"
+        output.write_text(rendered, encoding="utf-8")
     else:
-        rendered = _format_word_list(output_words)
-    output.write_text(rendered, encoding="utf-8")
+        headers = ["UR"] + [_format_word_compact(word) for word in segments]
+        rows: list[list[str]] = []
+        last_outputs: list[list[object]] = segments
+        for row_idx, row in enumerate(table_rows):
+            outputs = row.get("outputs")
+            if outputs is None:
+                outputs = row.get("output", [])
+            last_outputs = outputs
+            prev_outputs: list[list[object]]
+            if row_idx == 0:
+                prev_outputs = segments
+            else:
+                prev_row = table_rows[row_idx - 1]
+                prev_outputs = prev_row.get("outputs")
+                if prev_outputs is None:
+                    prev_outputs = prev_row.get("output", [])
+            rendered_outputs: list[str] = []
+            for idx, word in enumerate(outputs):
+                if idx < len(prev_outputs) and word == prev_outputs[idx]:
+                    rendered_outputs.append("---")
+                else:
+                    rendered_outputs.append(_format_word_compact(word))
+            rows.append([str(row.get("rule_id", ""))] + rendered_outputs)
+        final_rendered = [_format_word_compact(word) for word in last_outputs]
+        rows.append(["SR"] + final_rendered)
+
+        if output_format == "txt":
+            rendered = _render_ascii_table(headers, rows)
+            output.write_text(rendered, encoding="utf-8")
+        else:
+            delimiter = "," if output_format == "csv" else "\t"
+            buffer = io.StringIO()
+            writer = csv.writer(buffer, delimiter=delimiter)
+            writer.writerow(headers)
+            writer.writerows(rows)
+            output.write_text(buffer.getvalue(), encoding="utf-8")
     typer.echo("OK")
 
 
@@ -766,6 +844,7 @@ def init_samples(
     alphabet_path.write_text("\n".join(rows) + "\n", encoding="utf-8")
     rules_text = (
         "{\n"
+        '  "id": "sample_rules",\n'
         '  "rules": [\n'
         "    {\n"
         '      "id": "spread_f1_right",\n'
@@ -844,6 +923,28 @@ def _format_word_inline(word: list[object]) -> str:
                 json.dumps(item, ensure_ascii=False, separators=(",", ":"))
             )
     return f'[{",".join(rendered_items)}]'
+
+
+def _format_word_compact(word: list[object]) -> str:
+    return "".join(str(item) for item in word)
+
+
+def _render_ascii_table(headers: list[str], rows: list[list[str]]) -> str:
+    widths = [len(header) for header in headers]
+    for row in rows:
+        for idx, cell in enumerate(row):
+            widths[idx] = max(widths[idx], len(cell))
+
+    def render_row(cells: list[str]) -> str:
+        padded = [cell.ljust(widths[idx]) for idx, cell in enumerate(cells)]
+        return "| " + " | ".join(padded) + " |"
+
+    separator = "+-" + "-+-".join("-" * width for width in widths) + "-+"
+    lines = [separator, render_row(headers), separator]
+    for row in rows:
+        lines.append(render_row(row))
+        lines.append(separator)
+    return "\n".join(lines) + "\n"
 
 
 def _enforce_arc_limit(
