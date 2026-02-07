@@ -15,6 +15,15 @@ Create and activate an environment, then install:
    source .venv/bin/activate
    python -m pip install -e .
 
+Install from Conda
+------------------
+
+If you want the simplest setup that includes Pynini (required for AT&T output), install from conda:
+
+.. code-block:: bash
+
+   conda install mazadegan::snc2fst
+
 Conda + Pynini
 --------------
 

@@ -99,6 +99,12 @@ without reinstallation.
 snc2fst --help
 ```
 
+### Conda install
+
+```
+conda install mazadegan::snc2fst
+```
+
 ## CLI quickstart
 
 ### Generate sample files
