@@ -344,6 +344,10 @@ snc2fst eval samples/rules.json samples/input.json --alphabet samples/alphabet.c
 snc2fst validate samples/rules.json --alphabet samples/alphabet.csv --dump-vp
 ```
 
+## License
+
+Apache-2.0. See `LICENSE`.
+
 ## Testing
 
 Make sure your conda environment is active:
