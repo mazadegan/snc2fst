@@ -36,6 +36,27 @@ Generate example alphabet, rules, and input files:
 
    snc2fst init samples/
 
+Rules File Schema
+-----------------
+
+Rules files include a top-level ``id`` plus a ``rules`` array:
+
+.. code-block:: json
+
+   {
+     "id": "rules_id",
+     "rules": [
+       {
+         "id": "rule_1",
+         "dir": "LEFT",
+         "inr": [],
+         "trm": [],
+         "cnd": [],
+         "out": "(subtract INR (proj INR (F1)))"
+       }
+     ]
+   }
+
 Validate Rules + Input
 ----------------------
 
@@ -75,6 +96,25 @@ Use the Pynini backend and compare against the reference:
 .. code-block:: bash
 
    snc2fst eval samples/rules.json samples/input.json --alphabet samples/alphabet.csv --output samples/out.json --pynini --compare
+
+Output Formats
+--------------
+
+Select an output format (default: ``json``):
+
+.. code-block:: bash
+
+   snc2fst eval samples/rules.json samples/input.json --alphabet samples/alphabet.csv --format txt
+   snc2fst eval samples/rules.json samples/input.json --alphabet samples/alphabet.csv --format csv
+   snc2fst eval samples/rules.json samples/input.json --alphabet samples/alphabet.csv --format tsv
+
+If ``--output`` is omitted, the default is ``<rules_id>.out.<format>`` next to the rules file.
+
+For ``txt``, ``csv``, and ``tsv`` outputs, the table uses:
+
+* ``UR`` as the first column header (the original input words).
+* ``---`` when a rule does not change a word relative to the previous rule.
+* ``SR`` as the final row, containing the final outputs.
 
 Out DSL Quick Reference
 -----------------------
