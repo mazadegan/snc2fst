@@ -113,22 +113,18 @@ conda install mazadegan::snc2fst
 snc2fst init samples/
 ```
 
-## Example rules.json
+## Example rules.toml
 
-```json
-{
-  "id": "sample_rules",
-  "rules": [
-    {
-      "id": "spread_f1_right",
-      "dir": "RIGHT",
-      "inr": [["+","F1"]],
-      "trm": [["+", "F2"]],
-      "cnd": [],
-      "out": "(proj TRM (F1))"
-    }
-  ]
-}
+```toml
+id = "sample_rules"
+
+[[rules]]
+id = "spread_f1_right"
+dir = "RIGHT"
+inr = [["+", "F1"]]
+trm = [["+", "F2"]]
+cnd = []
+out = "(proj TRM (F1))"
 ```
 
 ### Out DSL
@@ -167,7 +163,7 @@ Notes:
 Rules validation requires an alphabet:
 
 ```
-snc2fst validate samples/rules.json --alphabet samples/alphabet.csv
+snc2fst validate samples/rules.toml --alphabet samples/alphabet.csv
 ```
 
 Validation type is inferred from the input file, but you can be explicit with
@@ -176,7 +172,7 @@ Validation type is inferred from the input file, but you can be explicit with
 Validate input words:
 
 ```
-snc2fst validate samples/input.json --kind input --alphabet samples/alphabet.csv
+snc2fst validate samples/input.toml --kind input --alphabet samples/alphabet.csv
 ```
 
 ### Compile a rule to AT&T + symtab
@@ -184,13 +180,13 @@ snc2fst validate samples/input.json --kind input --alphabet samples/alphabet.csv
 > Uses `pynini`/`pywrapfst`.
 
 ```
-snc2fst compile samples/rules.json samples/rule.att --alphabet samples/alphabet.csv
+snc2fst compile samples/rules.toml samples/rule.att --alphabet samples/alphabet.csv
 ```
 
 Compile and also emit a binary FST (requires `pynini`):
 
 ```
-snc2fst compile samples/rules.json samples/rule.att --alphabet samples/alphabet.csv --fst
+snc2fst compile samples/rules.toml samples/rule.att --alphabet samples/alphabet.csv --fst
 ```
 
 When the rules file contains multiple rules, omit `--rule-id` to compile all
@@ -203,37 +199,33 @@ written as `{rule_id}.att`, `{rule_id}.sym`, and (if `--fst` is set)
 Show progress bar when generating large FSTs:
 
 ```
-snc2fst compile samples/rules.json /tmp/rule.att --alphabet samples/alphabet.csv --progress
-snc2fst compile samples/rules.json /tmp/rule.att --alphabet samples/alphabet.csv -p
+snc2fst compile samples/rules.toml /tmp/rule.att --alphabet samples/alphabet.csv --progress
+snc2fst compile samples/rules.toml /tmp/rule.att --alphabet samples/alphabet.csv -p
 ```
 
 Guard against accidental blow‑ups (default --max-arcs is 5 million):
 
 ```
-snc2fst compile samples/rules.json /tmp/rule.att --alphabet samples/alphabet.csv --max-arcs 1000000
+snc2fst compile samples/rules.toml /tmp/rule.att --alphabet samples/alphabet.csv --max-arcs 1000000
 ```
 
 ### Evaluate input words
 
-Input format is JSON: a list of words, each word is a list of segment symbols
-from the alphabet.
+Input format is TOML: a table with an `inputs` array, where each word is a list
+of segment symbols from the alphabet. JSON files are still accepted.
 
 Rules files include a top-level `id` plus a `rules` array:
 
-```json
-{
-  "id": "rules_id",
-  "rules": [
-    {
-      "id": "rule_1",
-      "dir": "LEFT",
-      "inr": [],
-      "trm": [],
-      "cnd": [],
-      "out": "(subtract INR (proj INR (F1)))"
-    }
-  ]
-}
+```toml
+id = "rules_id"
+
+[[rules]]
+id = "rule_1"
+dir = "LEFT"
+inr = []
+trm = []
+cnd = []
+out = "(subtract INR (proj INR (F1)))"
 ```
 
 ### Build CLI docs
@@ -246,13 +238,13 @@ python -m pip install -e ".[docs]"
 python -m sphinx -b html docs docs/_build/html
 ```
 
-Example `input.json`:
+Example `input.toml`:
 
-```json
-[
+```toml
+inputs = [
   ["0", "A", "B", "C", "D"],
   ["J", "K", "L"],
-  ["T", "U", "V", "W", "X", "Y", "Z"]
+  ["T", "U", "V", "W", "X", "Y", "Z"],
 ]
 ```
 
@@ -310,7 +302,7 @@ Example with `--include-input`:
 ```
 
 ```
-snc2fst eval samples/rules.json samples/input.json --alphabet samples/alphabet.csv --output samples/out.json
+snc2fst eval samples/rules.toml samples/input.toml --alphabet samples/alphabet.csv --output samples/out.json
 ```
 
 If `--output` is omitted, the default is `<rules_id>.out.<format>` next to the rules file.
@@ -318,27 +310,27 @@ If `--output` is omitted, the default is `<rules_id>.out.<format>` next to the r
 Include input + output in the result:
 
 ```
-snc2fst eval samples/rules.json samples/input.json --alphabet samples/alphabet.csv --output samples/out.json --include-input
+snc2fst eval samples/rules.toml samples/input.toml --alphabet samples/alphabet.csv --output samples/out.json --include-input
 ```
 
 Strict symbol mapping (error if output bundle has no matching symbol in alphabet):
 
 ```
-snc2fst eval samples/rules.json samples/input.json --alphabet samples/alphabet.csv --output samples/out.json --strict
+snc2fst eval samples/rules.toml samples/input.toml --alphabet samples/alphabet.csv --output samples/out.json --strict
 ```
 
 Use the Pynini backend and compare to the reference evaluator (`--compare` requires `--pynini`):
 
 ```
-snc2fst eval samples/rules.json samples/input.json --alphabet samples/alphabet.csv --output samples/out.json --pynini --compare
+snc2fst eval samples/rules.toml samples/input.toml --alphabet samples/alphabet.csv --output samples/out.json --pynini --compare
 ```
 
 Select an output format (default: `json`):
 
 ```
-snc2fst eval samples/rules.json samples/input.json --alphabet samples/alphabet.csv --format txt
-snc2fst eval samples/rules.json samples/input.json --alphabet samples/alphabet.csv --format csv
-snc2fst eval samples/rules.json samples/input.json --alphabet samples/alphabet.csv --format tsv
+snc2fst eval samples/rules.toml samples/input.toml --alphabet samples/alphabet.csv --format txt
+snc2fst eval samples/rules.toml samples/input.toml --alphabet samples/alphabet.csv --format csv
+snc2fst eval samples/rules.toml samples/input.toml --alphabet samples/alphabet.csv --format tsv
 ```
 
 ### Inspect V and P
@@ -346,8 +338,8 @@ snc2fst eval samples/rules.json samples/input.json --alphabet samples/alphabet.c
 Print the feature sets used to build the machine:
 
 ```
-snc2fst eval samples/rules.json samples/input.json --alphabet samples/alphabet.csv --output samples/out.json --dump-vp
-snc2fst validate samples/rules.json --alphabet samples/alphabet.csv --dump-vp
+snc2fst eval samples/rules.toml samples/input.toml --alphabet samples/alphabet.csv --output samples/out.json --dump-vp
+snc2fst validate samples/rules.toml --alphabet samples/alphabet.csv --dump-vp
 ```
 
 ## License

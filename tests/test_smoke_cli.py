@@ -22,8 +22,8 @@ def test_cli_smoke(tmp_path: Path) -> None:
     assert result.exit_code == 0, result.output
 
     alphabet = tmp_path / "alphabet.csv"
-    rules = tmp_path / "rules.json"
-    inputs = tmp_path / "input.json"
+    rules = tmp_path / "rules.toml"
+    inputs = tmp_path / "input.toml"
     assert alphabet.exists()
     assert rules.exists()
     assert inputs.exists()

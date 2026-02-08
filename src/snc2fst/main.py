@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import tomllib
 from pathlib import Path
 
 import typer
@@ -117,13 +118,65 @@ def _table_to_json(
     )
 
 
-def _load_json(path: Path) -> dict:
+def _load_json(path: Path) -> object:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         raise typer.BadParameter(
             f"Invalid JSON: {exc.msg} (line {exc.lineno}, column {exc.colno})"
         ) from exc
+
+
+def _load_toml(path: Path) -> object:
+    try:
+        return tomllib.loads(path.read_text(encoding="utf-8"))
+    except tomllib.TOMLDecodeError as exc:
+        raise typer.BadParameter(
+            f"Invalid TOML: {exc.msg} (line {exc.lineno}, column {exc.colno})"
+        ) from exc
+
+
+def _load_rules_payload(path: Path) -> dict:
+    suffix = path.suffix.lower()
+    if suffix == ".json":
+        payload = _load_json(path)
+    elif suffix == ".toml":
+        payload = _load_toml(path)
+    else:
+        raise typer.BadParameter(
+            "Rules file must be a .json or .toml file."
+        )
+    if not isinstance(payload, dict):
+        raise typer.BadParameter(
+            "Rules file must be an object/table with a 'rules' array."
+        )
+    return payload
+
+
+def _load_input_payload(path: Path) -> list[object]:
+    suffix = path.suffix.lower()
+    if suffix == ".json":
+        payload = _load_json(path)
+        if not isinstance(payload, list):
+            raise typer.BadParameter(
+                "Input JSON must be an array of words (arrays of symbols)."
+            )
+        return payload
+    if suffix == ".toml":
+        payload = _load_toml(path)
+        if not isinstance(payload, dict):
+            raise typer.BadParameter(
+                "Input TOML must be a table containing an 'inputs' array."
+            )
+        inputs = payload.get("inputs")
+        if not isinstance(inputs, list):
+            raise typer.BadParameter(
+                "Input TOML must define 'inputs' as an array of words."
+            )
+        return inputs
+    raise typer.BadParameter(
+        "Input file must be a .json or .toml file."
+    )
 
 
 def _load_alphabet_features(alphabet_path: Path) -> set[str]:
@@ -171,11 +224,11 @@ def _validate_rule_features(
 def _validate_rules_file(
     rules_path: Path, alphabet_path: Path | None
 ) -> RulesFile:
-    payload = _load_json(rules_path)
+    payload = _load_rules_payload(rules_path)
 
     if alphabet_path is None:
         raise typer.BadParameter(
-            "Rules validation requires an alphabet JSON file; pass --alphabet."
+            "Rules validation requires an alphabet CSV/TSV file; pass --alphabet."
         )
 
     features = _load_alphabet_features(alphabet_path)
@@ -211,11 +264,7 @@ def _validate_input_words(
         )
     alphabet_data = _load_alphabet(alphabet_path)
     symbols = {row.symbol for row in alphabet_data.rows}
-    payload = _load_json(input_path)
-    if not isinstance(payload, list):
-        raise typer.BadParameter(
-            "Input JSON must be an array of words (arrays of symbols)."
-        )
+    payload = _load_input_payload(input_path)
     for idx, word in enumerate(payload):
         if not isinstance(word, list):
             raise typer.BadParameter(
@@ -252,7 +301,7 @@ def validate(
         exists=True,
         dir_okay=False,
         readable=True,
-        help="Rules JSON or alphabet CSV/TSV file to validate.",
+        help="Rules JSON/TOML or alphabet CSV/TSV file to validate.",
     ),
     kind: str | None = typer.Option(
         None,
@@ -291,21 +340,26 @@ def validate(
         help="Print estimated states/arcs for the compiled FST.",
     ),
 ) -> None:
-    """Validate a rules JSON, alphabet CSV/TSV, or input words JSON."""
+    """Validate a rules JSON/TOML, alphabet CSV/TSV, or input words file."""
     kind_value = kind.lower() if kind else None
     if kind_value is None:
-        if input_path.suffix.lower() == ".json":
+        if input_path.suffix.lower() in {".json", ".toml"}:
             try:
-                payload = _load_json(input_path)
+                if input_path.suffix.lower() == ".json":
+                    payload = _load_json(input_path)
+                else:
+                    payload = _load_toml(input_path)
             except typer.BadParameter:
                 payload = None
             if isinstance(payload, dict) and "rules" in payload:
                 kind_value = "rules"
             elif isinstance(payload, list):
                 kind_value = "input"
+            elif isinstance(payload, dict) and "inputs" in payload:
+                kind_value = "input"
             else:
                 raise typer.BadParameter(
-                    "Unable to infer JSON kind; use --kind."
+                    "Unable to infer JSON/TOML kind; use --kind."
                 )
         else:
             kind_value = "alphabet"
@@ -371,7 +425,7 @@ def compile_rule(
         exists=True,
         dir_okay=False,
         readable=True,
-        help="Rules JSON file to compile.",
+        help="Rules JSON/TOML file to compile.",
     ),
     output: Path = typer.Argument(
         ...,
@@ -426,7 +480,7 @@ def compile_rule(
     reversing input/output at evaluation time.
     This command requires Pynini/pywrapfst.
     """
-    payload = _load_json(rules_path)
+    payload = _load_rules_payload(rules_path)
     try:
         rules_file = RulesFile.model_validate(payload)
     except ValidationError as exc:
@@ -529,14 +583,14 @@ def eval_rule(
         exists=True,
         dir_okay=False,
         readable=True,
-        help="Rules JSON file to evaluate.",
+        help="Rules JSON/TOML file to evaluate.",
     ),
     input_path: Path = typer.Argument(
         ...,
         exists=True,
         dir_okay=False,
         readable=True,
-        help="Input JSON array of words (each word is an array of symbols).",
+        help="Input JSON/TOML words file (each word is an array of symbols).",
     ),
     output: Path | None = typer.Option(
         None,
@@ -597,7 +651,7 @@ def eval_rule(
     The compiled machine is canonical LEFT; RIGHT rules are evaluated by
     reversing input/output around the machine.
     """
-    payload = _load_json(rules_path)
+    payload = _load_rules_payload(rules_path)
     try:
         rules_file = RulesFile.model_validate(payload)
     except ValidationError as exc:
@@ -633,16 +687,7 @@ def eval_rule(
         selected_rules = [_select_rule(rules, rule_id)]
     else:
         selected_rules = list(rules)
-    try:
-        segments = json.loads(input_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        raise typer.BadParameter(
-            f"Invalid JSON: {exc.msg} (line {exc.lineno}, column {exc.colno})"
-        ) from exc
-    if not isinstance(segments, list):
-        raise typer.BadParameter(
-            "Input JSON must be an array of words (arrays of symbols)."
-        )
+    segments = _load_input_payload(input_path)
 
     symbol_to_bundle: dict[str, dict[str, str]] = {}
     bundle_to_symbol: dict[tuple[str, ...], str] = {}
@@ -807,7 +852,7 @@ def init_samples(
         help="Overwrite existing sample files.",
     ),
 ) -> None:
-    """Generate sample alphabet.csv, rules.json, and input.json files.
+    """Generate sample alphabet.csv, rules.toml, and input.toml files.
 
     The sample alphabet has 3 features and 27 symbols, the rules file has
     one rule, and the input file includes multiple example sentences.
@@ -815,8 +860,8 @@ def init_samples(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     alphabet_path = output_dir / "alphabet.csv"
-    rules_path = output_dir / "rules.json"
-    input_path = output_dir / "input.json"
+    rules_path = output_dir / "rules.toml"
+    input_path = output_dir / "input.toml"
 
     if not force:
         existing = [
@@ -843,28 +888,23 @@ def init_samples(
         rows.append(f"{feature}," + ",".join(values))
     alphabet_path.write_text("\n".join(rows) + "\n", encoding="utf-8")
     rules_text = (
-        "{\n"
-        '  "id": "sample_rules",\n'
-        '  "rules": [\n'
-        "    {\n"
-        '      "id": "spread_f1_right",\n'
-        '      "dir": "RIGHT",\n'
-        '      "inr": [["+","F1"]],\n'
-        '      "trm": [["+", "F2"]],\n'
-        '      "cnd": [],\n'
-        '      "out": "(proj TRM (F1))"\n'
-        "    }\n"
-        "  ]\n"
-        "}\n"
+        'id = "sample_rules"\n'
+        "\n"
+        "[[rules]]\n"
+        'id = "spread_f1_right"\n'
+        'dir = "RIGHT"\n'
+        'inr = [["+", "F1"]]\n'
+        'trm = [["+", "F2"]]\n'
+        "cnd = []\n"
+        'out = "(proj TRM (F1))"\n'
     )
     rules_path.write_text(rules_text, encoding="utf-8")
-    input_text = (
-        "[\n"
-        '  ["0", "A", "B", "C", "D"],\n'
-        '  ["J", "K", "L"],\n'
-        '  ["T", "U", "V", "W", "X", "Y", "Z"]\n'
-        "]\n"
-    )
+    input_words = [
+        ["0", "A", "B", "C", "D"],
+        ["J", "K", "L"],
+        ["T", "U", "V", "W", "X", "Y", "Z"],
+    ]
+    input_text = "inputs = " + _format_word_list(input_words).rstrip() + "\n"
     input_path.write_text(input_text, encoding="utf-8")
     base = Path.cwd().resolve()
     def _relpath(path: Path) -> Path:

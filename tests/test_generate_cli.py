@@ -1,5 +1,5 @@
-import json
 import sys
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -19,19 +19,20 @@ def test_init_creates_sample_files(tmp_path: Path) -> None:
     assert result.exit_code == 0, result.output
 
     alphabet_path = output_dir / "alphabet.csv"
-    rules_path = output_dir / "rules.json"
-    input_path = output_dir / "input.json"
+    rules_path = output_dir / "rules.toml"
+    input_path = output_dir / "input.toml"
     assert alphabet_path.exists()
     assert rules_path.exists()
     assert input_path.exists()
 
-    rules = json.loads(rules_path.read_text(encoding="utf-8"))
+    rules = tomllib.loads(rules_path.read_text(encoding="utf-8"))
     assert "id" in rules
     assert "rules" in rules
     assert len(rules["rules"]) == 1
-    input_payload = json.loads(input_path.read_text(encoding="utf-8"))
-    assert isinstance(input_payload, list)
-    assert len(input_payload) >= 3
+    input_payload = tomllib.loads(input_path.read_text(encoding="utf-8"))
+    assert isinstance(input_payload, dict)
+    assert isinstance(input_payload.get("inputs"), list)
+    assert len(input_payload["inputs"]) >= 3
 
     alphabet_lines = alphabet_path.read_text(encoding="utf-8").splitlines()
     header = alphabet_lines[0].split(",")
@@ -47,5 +48,5 @@ def test_init_defaults_to_cwd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     assert result.exit_code == 0, result.output
 
     assert (tmp_path / "alphabet.csv").exists()
-    assert (tmp_path / "rules.json").exists()
-    assert (tmp_path / "input.json").exists()
+    assert (tmp_path / "rules.toml").exists()
+    assert (tmp_path / "input.toml").exists()

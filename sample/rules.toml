@@ -1,0 +1,9 @@
+id = "sample_rules"
+
+[[rules]]
+id = "spread_f1_right"
+dir = "RIGHT"
+inr = [["+", "F1"]]
+trm = [["+", "F2"]]
+cnd = []
+out = "(proj TRM (F1))"

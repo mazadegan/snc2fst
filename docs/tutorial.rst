@@ -50,21 +50,17 @@ Rules File Schema
 
 Rules files include a top-level ``id`` plus a ``rules`` array:
 
-.. code-block:: json
+.. code-block:: toml
 
-   {
-     "id": "rules_id",
-     "rules": [
-       {
-         "id": "rule_1",
-         "dir": "LEFT",
-         "inr": [],
-         "trm": [],
-         "cnd": [],
-         "out": "(subtract INR (proj INR (F1)))"
-       }
-     ]
-   }
+   id = "rules_id"
+
+   [[rules]]
+   id = "rule_1"
+   dir = "LEFT"
+   inr = []
+   trm = []
+   cnd = []
+   out = "(subtract INR (proj INR (F1)))"
 
 Validate Rules + Input
 ----------------------
@@ -73,8 +69,8 @@ Validation requires the alphabet:
 
 .. code-block:: bash
 
-   snc2fst validate samples/rules.json --alphabet samples/alphabet.csv
-   snc2fst validate samples/input.json --kind input --alphabet samples/alphabet.csv
+   snc2fst validate samples/rules.toml --alphabet samples/alphabet.csv
+   snc2fst validate samples/input.toml --kind input --alphabet samples/alphabet.csv
 
 Compile a Rule
 --------------
@@ -83,13 +79,13 @@ Compile a rule to AT&T and symbol table files:
 
 .. code-block:: bash
 
-   snc2fst compile samples/rules.json samples/rule.att --alphabet samples/alphabet.csv
+   snc2fst compile samples/rules.toml samples/rule.att --alphabet samples/alphabet.csv
 
 Write a binary FST alongside the AT&T output:
 
 .. code-block:: bash
 
-   snc2fst compile samples/rules.json samples/rule.att --alphabet samples/alphabet.csv --fst
+   snc2fst compile samples/rules.toml samples/rule.att --alphabet samples/alphabet.csv --fst
 
 Evaluate Input
 --------------
@@ -98,13 +94,13 @@ Evaluate input words with the reference evaluator:
 
 .. code-block:: bash
 
-   snc2fst eval samples/rules.json samples/input.json --alphabet samples/alphabet.csv --output samples/out.json
+   snc2fst eval samples/rules.toml samples/input.toml --alphabet samples/alphabet.csv --output samples/out.json
 
 Use the Pynini backend and compare against the reference:
 
 .. code-block:: bash
 
-   snc2fst eval samples/rules.json samples/input.json --alphabet samples/alphabet.csv --output samples/out.json --pynini --compare
+   snc2fst eval samples/rules.toml samples/input.toml --alphabet samples/alphabet.csv --output samples/out.json --pynini --compare
 
 Output Formats
 --------------
@@ -113,9 +109,9 @@ Select an output format (default: ``json``):
 
 .. code-block:: bash
 
-   snc2fst eval samples/rules.json samples/input.json --alphabet samples/alphabet.csv --format txt
-   snc2fst eval samples/rules.json samples/input.json --alphabet samples/alphabet.csv --format csv
-   snc2fst eval samples/rules.json samples/input.json --alphabet samples/alphabet.csv --format tsv
+   snc2fst eval samples/rules.toml samples/input.toml --alphabet samples/alphabet.csv --format txt
+   snc2fst eval samples/rules.toml samples/input.toml --alphabet samples/alphabet.csv --format csv
+   snc2fst eval samples/rules.toml samples/input.toml --alphabet samples/alphabet.csv --format tsv
 
 If ``--output`` is omitted, the default is ``<rules_id>.out.<format>`` next to the rules file.
 
