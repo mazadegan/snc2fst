@@ -16,6 +16,7 @@ from .rules import RulesFile, Rule
 from .compile_pynini_fst import (
     compile_pynini_fst,
     evaluate_with_pynini,
+    to_gallic_like,
     write_att_pynini,
 )
 
@@ -473,6 +474,11 @@ def compile_rule(
         "-p",
         help="Show a progress bar during compilation.",
     ),
+    optimize: bool = typer.Option(
+        False,
+        "--optimize",
+        help="Optimize the compiled FST (determinize/push/minimize).",
+    ),
 ) -> None:
     """Compile a single rule into AT&T text format (always writes .att and .sym).
 
@@ -544,6 +550,16 @@ def compile_rule(
             v_features=v_features,
             p_features=p_features,
         )
+        before_counts = None
+        if optimize:
+            before_counts = _count_fst_states_arcs(machine.fst)
+        if optimize:
+            machine = to_gallic_like(machine)
+            after_counts = _count_fst_states_arcs(machine.fst)
+            if before_counts == after_counts:
+                typer.echo(
+                    "optimize: no reduction in states/arcs after determinize/push/minimize"
+                )
         if progress:
             typer.echo("writing output...")
 
@@ -551,6 +567,8 @@ def compile_rule(
             att_path = output
         else:
             att_path = output_dir / f"{rule.id}.att"
+        if optimize:
+            att_path = att_path.with_suffix(".opt.att")
         if symtab is not None and output_dir is None:
             symtab_path = symtab
         else:
@@ -563,10 +581,7 @@ def compile_rule(
             else:
                 fst_out = output_dir / f"{rule.id}.fst"
                 machine.fst.write(str(fst_out))
-        arc_count = 0
-        for state in machine.fst.states():
-            arc_count += sum(1 for _ in machine.fst.arcs(state))
-        state_count = machine.fst.num_states()
+        state_count, arc_count = _count_fst_states_arcs(machine.fst)
         typer.echo(
             f"done. states={state_count} arcs={arc_count}"
         )
@@ -1027,6 +1042,15 @@ def _diff_word_lists(
             f"word count mismatch: expected={len(expected)} actual={len(actual)}"
         )
     return diffs
+
+
+def _count_fst_states_arcs(fst_obj: object) -> tuple[int, int]:
+    arc_count = 0
+    state_count = 0
+    for state in fst_obj.states():
+        state_count += 1
+        arc_count += sum(1 for _ in fst_obj.arcs(state))
+    return state_count, arc_count
 
 
 def _evaluate_with_reference(

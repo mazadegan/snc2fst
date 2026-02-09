@@ -189,6 +189,12 @@ Compile and also emit a binary FST (requires `pynini`):
 snc2fst compile samples/rules.toml samples/rule.att --alphabet samples/alphabet.csv --fst
 ```
 
+Optimize the compiled FST before writing output:
+
+```
+snc2fst compile samples/rules.toml samples/rule.att --alphabet samples/alphabet.csv --optimize
+```
+
 When the rules file contains multiple rules, omit `--rule-id` to compile all
 of them. In that case, `output` is treated as a directory and each rule is
 written as `{rule_id}.att`, `{rule_id}.sym`, and (if `--fst` is set)

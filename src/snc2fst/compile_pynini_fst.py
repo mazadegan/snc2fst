@@ -138,6 +138,25 @@ def write_pynini_fst(
     machine.fst.write(str(fst_path))
 
 
+def to_gallic_like(machine: PyniniMachine) -> PyniniMachine:
+    try:
+        import pynini
+        import tempfile
+    except ImportError as exc:  # pragma: no cover - optional dependency
+        raise typer.BadParameter(
+            "Pynini not available; install pynini to use --optimize."
+        ) from exc
+
+    with tempfile.NamedTemporaryFile(suffix=".fst", delete=True) as tmp:
+        machine.fst.write(tmp.name)
+        optimized = pynini.optimize(pynini.Fst.read(tmp.name))
+    return PyniniMachine(
+        fst=optimized,
+        v_order=machine.v_order,
+        p_order=machine.p_order,
+    )
+
+
 def write_att_pynini(
     machine: PyniniMachine,
     output_path: Path,

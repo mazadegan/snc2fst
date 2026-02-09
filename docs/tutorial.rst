@@ -87,6 +87,12 @@ Write a binary FST alongside the AT&T output:
 
    snc2fst compile samples/rules.toml samples/rule.att --alphabet samples/alphabet.csv --fst
 
+Optimize the compiled FST before writing output:
+
+.. code-block:: bash
+
+   snc2fst compile samples/rules.toml samples/rule.att --alphabet samples/alphabet.csv --optimize
+
 Evaluate Input
 --------------
 
