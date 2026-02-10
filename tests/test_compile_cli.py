@@ -53,9 +53,8 @@ def test_compile_writes_att_and_symtab(tmp_path: Path) -> None:
         [
             "compile",
             str(rules_path),
-            str(output_path),
-            "--alphabet",
             str(alphabet_path),
+            str(output_path),
         ],
     )
     assert result.exit_code == 0, result.output
@@ -96,9 +95,8 @@ def test_compile_outputs_expected_att_and_symtab(tmp_path: Path) -> None:
         [
             "compile",
             str(rules_path),
-            str(output_path),
-            "--alphabet",
             str(alphabet_path),
+            str(output_path),
         ],
     )
     assert result.exit_code == 0, result.output
@@ -163,9 +161,8 @@ def test_compile_respects_max_arcs(tmp_path: Path) -> None:
         [
             "compile",
             str(rules_path),
-            str(output_path),
-            "--alphabet",
             str(alphabet_path),
+            str(output_path),
             "--max-arcs",
             "1",
         ],

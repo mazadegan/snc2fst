@@ -163,16 +163,19 @@ Notes:
 Rules validation requires an alphabet:
 
 ```
-snc2fst validate samples/rules.toml --alphabet samples/alphabet.csv
+snc2fst validate rules samples/rules.toml samples/alphabet.csv
 ```
 
-Validation type is inferred from the input file, but you can be explicit with
-`--kind` (rules, alphabet, or input).
+Validate an alphabet file:
+
+```
+snc2fst validate alphabet samples/alphabet.csv
+```
 
 Validate input words:
 
 ```
-snc2fst validate samples/input.toml --kind input --alphabet samples/alphabet.csv
+snc2fst validate input samples/input.toml samples/alphabet.csv
 ```
 
 ### Compile a rule to AT&T + symtab
@@ -180,19 +183,19 @@ snc2fst validate samples/input.toml --kind input --alphabet samples/alphabet.csv
 > Uses `pynini`/`pywrapfst`.
 
 ```
-snc2fst compile samples/rules.toml samples/rule.att --alphabet samples/alphabet.csv
+snc2fst compile samples/rules.toml samples/alphabet.csv samples/rule.att
 ```
 
 Compile and also emit a binary FST (requires `pynini`):
 
 ```
-snc2fst compile samples/rules.toml samples/rule.att --alphabet samples/alphabet.csv --fst
+snc2fst compile samples/rules.toml samples/alphabet.csv samples/rule.att --fst
 ```
 
 Optimize the compiled FST before writing output:
 
 ```
-snc2fst compile samples/rules.toml samples/rule.att --alphabet samples/alphabet.csv --optimize
+snc2fst compile samples/rules.toml samples/alphabet.csv samples/rule.att --optimize
 ```
 
 When the rules file contains multiple rules, omit `--rule-id` to compile all
@@ -200,19 +203,19 @@ of them. In that case, `output` is treated as a directory and each rule is
 written as `{rule_id}.att`, `{rule_id}.sym`, and (if `--fst` is set)
 `{rule_id}.fst`.
 
-`compile` requires `--alphabet`.
+`compile` requires the alphabet argument.
 
 Show progress bar when generating large FSTs:
 
 ```
-snc2fst compile samples/rules.toml /tmp/rule.att --alphabet samples/alphabet.csv --progress
-snc2fst compile samples/rules.toml /tmp/rule.att --alphabet samples/alphabet.csv -p
+snc2fst compile samples/rules.toml samples/alphabet.csv /tmp/rule.att --progress
+snc2fst compile samples/rules.toml samples/alphabet.csv /tmp/rule.att -p
 ```
 
 Guard against accidental blow‑ups (default --max-arcs is 5 million):
 
 ```
-snc2fst compile samples/rules.toml /tmp/rule.att --alphabet samples/alphabet.csv --max-arcs 1000000
+snc2fst compile samples/rules.toml samples/alphabet.csv /tmp/rule.att --max-arcs 1000000
 ```
 
 ### Evaluate input words
@@ -308,7 +311,7 @@ Example with `--include-input`:
 ```
 
 ```
-snc2fst eval samples/rules.toml samples/input.toml --alphabet samples/alphabet.csv --output samples/out.json
+snc2fst eval samples/rules.toml samples/alphabet.csv samples/input.toml --output samples/out.json
 ```
 
 If `--output` is omitted, the default is `<rules_id>.out.<format>` next to the rules file.
@@ -316,27 +319,27 @@ If `--output` is omitted, the default is `<rules_id>.out.<format>` next to the r
 Include input + output in the result:
 
 ```
-snc2fst eval samples/rules.toml samples/input.toml --alphabet samples/alphabet.csv --output samples/out.json --include-input
+snc2fst eval samples/rules.toml samples/alphabet.csv samples/input.toml --output samples/out.json --include-input
 ```
 
 Strict symbol mapping (error if output bundle has no matching symbol in alphabet):
 
 ```
-snc2fst eval samples/rules.toml samples/input.toml --alphabet samples/alphabet.csv --output samples/out.json --strict
+snc2fst eval samples/rules.toml samples/alphabet.csv samples/input.toml --output samples/out.json --strict
 ```
 
-Use the Pynini backend and compare to the reference evaluator (`--compare` requires `--pynini`):
+Use the Pynini backend and compare to the reference evaluator (`--compare` implies `--pynini`):
 
 ```
-snc2fst eval samples/rules.toml samples/input.toml --alphabet samples/alphabet.csv --output samples/out.json --pynini --compare
+snc2fst eval samples/rules.toml samples/alphabet.csv samples/input.toml --output samples/out.json --pynini --compare
 ```
 
 Select an output format (default: `json`):
 
 ```
-snc2fst eval samples/rules.toml samples/input.toml --alphabet samples/alphabet.csv --format txt
-snc2fst eval samples/rules.toml samples/input.toml --alphabet samples/alphabet.csv --format csv
-snc2fst eval samples/rules.toml samples/input.toml --alphabet samples/alphabet.csv --format tsv
+snc2fst eval samples/rules.toml samples/alphabet.csv samples/input.toml --format txt
+snc2fst eval samples/rules.toml samples/alphabet.csv samples/input.toml --format csv
+snc2fst eval samples/rules.toml samples/alphabet.csv samples/input.toml --format tsv
 ```
 
 ### Inspect V and P
@@ -344,8 +347,8 @@ snc2fst eval samples/rules.toml samples/input.toml --alphabet samples/alphabet.c
 Print the feature sets used to build the machine:
 
 ```
-snc2fst eval samples/rules.toml samples/input.toml --alphabet samples/alphabet.csv --output samples/out.json --dump-vp
-snc2fst validate samples/rules.toml --alphabet samples/alphabet.csv --dump-vp
+snc2fst eval samples/rules.toml samples/alphabet.csv samples/input.toml --output samples/out.json --dump-vp
+snc2fst validate rules samples/rules.toml samples/alphabet.csv --dump-vp
 ```
 
 ## License
@@ -408,6 +411,6 @@ Use `--compare` to cross‑check outputs.
 
 ## Troubleshooting
 
-- **"Evaluation requires an alphabet"** → pass `--alphabet`.
+- **"Evaluation requires an alphabet"** → provide the `alphabet` argument.
 - **"Unknown symbol"** → input contains symbols not in the alphabet.
 - **"--max-arcs exceeded"** → reduce features or raise `--max-arcs`.

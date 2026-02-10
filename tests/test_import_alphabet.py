@@ -16,7 +16,7 @@ def test_validate_csv_example(tmp_path: Path) -> None:
     table_path.write_text(csv_content, encoding="utf-8")
 
     runner = CliRunner()
-    result = runner.invoke(app, ["validate", str(table_path)])
+    result = runner.invoke(app, ["validate", "alphabet", str(table_path)])
     assert result.exit_code == 0, result.output
     assert result.output.strip() == "OK"
 
@@ -27,6 +27,6 @@ def test_validate_tsv_example(tmp_path: Path) -> None:
     table_path.write_text(tsv_content, encoding="utf-8")
 
     runner = CliRunner()
-    result = runner.invoke(app, ["validate", str(table_path)])
+    result = runner.invoke(app, ["validate", "alphabet", str(table_path)])
     assert result.exit_code == 0, result.output
     assert result.output.strip() == "OK"

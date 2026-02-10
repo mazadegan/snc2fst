@@ -69,8 +69,8 @@ Validation requires the alphabet:
 
 .. code-block:: bash
 
-   snc2fst validate samples/rules.toml --alphabet samples/alphabet.csv
-   snc2fst validate samples/input.toml --kind input --alphabet samples/alphabet.csv
+   snc2fst validate rules samples/rules.toml samples/alphabet.csv
+   snc2fst validate input samples/input.toml samples/alphabet.csv
 
 Compile a Rule
 --------------
@@ -79,19 +79,19 @@ Compile a rule to AT&T and symbol table files:
 
 .. code-block:: bash
 
-   snc2fst compile samples/rules.toml samples/rule.att --alphabet samples/alphabet.csv
+   snc2fst compile samples/rules.toml samples/alphabet.csv samples/rule.att
 
 Write a binary FST alongside the AT&T output:
 
 .. code-block:: bash
 
-   snc2fst compile samples/rules.toml samples/rule.att --alphabet samples/alphabet.csv --fst
+   snc2fst compile samples/rules.toml samples/alphabet.csv samples/rule.att --fst
 
 Optimize the compiled FST before writing output:
 
 .. code-block:: bash
 
-   snc2fst compile samples/rules.toml samples/rule.att --alphabet samples/alphabet.csv --optimize
+   snc2fst compile samples/rules.toml samples/alphabet.csv samples/rule.att --optimize
 
 Evaluate Input
 --------------
@@ -100,13 +100,13 @@ Evaluate input words with the reference evaluator:
 
 .. code-block:: bash
 
-   snc2fst eval samples/rules.toml samples/input.toml --alphabet samples/alphabet.csv --output samples/out.json
+   snc2fst eval samples/rules.toml samples/alphabet.csv samples/input.toml --output samples/out.json
 
 Use the Pynini backend and compare against the reference:
 
 .. code-block:: bash
 
-   snc2fst eval samples/rules.toml samples/input.toml --alphabet samples/alphabet.csv --output samples/out.json --pynini --compare
+   snc2fst eval samples/rules.toml samples/alphabet.csv samples/input.toml --output samples/out.json --pynini --compare
 
 Output Formats
 --------------
@@ -115,9 +115,9 @@ Select an output format (default: ``json``):
 
 .. code-block:: bash
 
-   snc2fst eval samples/rules.toml samples/input.toml --alphabet samples/alphabet.csv --format txt
-   snc2fst eval samples/rules.toml samples/input.toml --alphabet samples/alphabet.csv --format csv
-   snc2fst eval samples/rules.toml samples/input.toml --alphabet samples/alphabet.csv --format tsv
+   snc2fst eval samples/rules.toml samples/alphabet.csv samples/input.toml --format txt
+   snc2fst eval samples/rules.toml samples/alphabet.csv samples/input.toml --format csv
+   snc2fst eval samples/rules.toml samples/alphabet.csv samples/input.toml --format tsv
 
 If ``--output`` is omitted, the default is ``<rules_id>.out.<format>`` next to the rules file.
 

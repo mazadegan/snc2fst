@@ -30,17 +30,15 @@ def test_cli_smoke(tmp_path: Path) -> None:
 
     # validate
     result = runner.invoke(
-        app, ["validate", str(rules), "--alphabet", str(alphabet)]
+        app, ["validate", "rules", str(rules), str(alphabet)]
     )
     assert result.exit_code == 0, result.output
     result = runner.invoke(
         app,
         [
             "validate",
-            str(inputs),
-            "--kind",
             "input",
-            "--alphabet",
+            str(inputs),
             str(alphabet),
         ],
     )
@@ -49,7 +47,7 @@ def test_cli_smoke(tmp_path: Path) -> None:
     # compile
     att_path = tmp_path / "rule.att"
     result = runner.invoke(
-        app, ["compile", str(rules), str(att_path), "--alphabet", str(alphabet)]
+        app, ["compile", str(rules), str(alphabet), str(att_path)]
     )
     assert result.exit_code == 0, result.output
     assert att_path.exists()
@@ -62,11 +60,10 @@ def test_cli_smoke(tmp_path: Path) -> None:
         [
             "eval",
             str(rules),
+            str(alphabet),
             str(inputs),
             "--output",
             str(out_path),
-            "--alphabet",
-            str(alphabet),
             "--pynini",
             "--compare",
         ],

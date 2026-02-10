@@ -34,7 +34,7 @@ def test_validate_rules_json(tmp_path: Path) -> None:
 
     runner = CliRunner()
     result = runner.invoke(
-        app, ["validate", str(rules_path), "--alphabet", str(alphabet_path)]
+        app, ["validate", "rules", str(rules_path), str(alphabet_path)]
     )
     assert result.exit_code == 0, result.output
     assert result.output.strip() == "OK"
@@ -54,33 +54,8 @@ def test_validate_input_words(tmp_path: Path) -> None:
         app,
         [
             "validate",
-            str(input_path),
-            "--kind",
             "input",
-            "--alphabet",
-            str(alphabet_path),
-        ],
-    )
-    assert result.exit_code == 0, result.output
-    assert result.output.strip() == "OK"
-
-
-def test_validate_input_words_auto_detect(tmp_path: Path) -> None:
-    alphabet_content = ",a,b\nVoice,0,0\n"
-    alphabet_path = tmp_path / "alphabet.csv"
-    alphabet_path.write_text(alphabet_content, encoding="utf-8")
-
-    payload = [["a", "b"], ["b"]]
-    input_path = tmp_path / "input.json"
-    input_path.write_text(json.dumps(payload), encoding="utf-8")
-
-    runner = CliRunner()
-    result = runner.invoke(
-        app,
-        [
-            "validate",
             str(input_path),
-            "--alphabet",
             str(alphabet_path),
         ],
     )
@@ -114,8 +89,8 @@ def test_validate_rules_dump_vp(tmp_path: Path) -> None:
         app,
         [
             "validate",
+            "rules",
             str(rules_path),
-            "--alphabet",
             str(alphabet_path),
             "--dump-vp",
         ],
@@ -151,8 +126,8 @@ def test_validate_rules_fst_stats(tmp_path: Path) -> None:
         app,
         [
             "validate",
+            "rules",
             str(rules_path),
-            "--alphabet",
             str(alphabet_path),
             "--fst-stats",
         ],
@@ -184,7 +159,7 @@ def test_validate_rules_unknown_out_feature(tmp_path: Path) -> None:
 
     runner = CliRunner()
     result = runner.invoke(
-        app, ["validate", str(rules_path), "--alphabet", str(alphabet_path)]
+        app, ["validate", "rules", str(rules_path), str(alphabet_path)]
     )
     assert result.exit_code != 0
     assert "unknown feature" in result.output.lower()

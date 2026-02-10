@@ -229,7 +229,8 @@ def _validate_rules_file(
 
     if alphabet_path is None:
         raise typer.BadParameter(
-            "Rules validation requires an alphabet CSV/TSV file; pass --alphabet."
+            "Rules validation requires an alphabet CSV/TSV file. "
+            f"Try: snc2fst validate rules {rules_path} alphabet.csv"
         )
 
     features = _load_alphabet_features(alphabet_path)
@@ -261,7 +262,8 @@ def _validate_input_words(
 ) -> None:
     if alphabet_path is None:
         raise typer.BadParameter(
-            "Input validation requires an alphabet file; pass --alphabet."
+            "Input validation requires an alphabet file. "
+            f"Try: snc2fst validate input {input_path} alphabet.csv"
         )
     alphabet_data = _load_alphabet(alphabet_path)
     symbols = {row.symbol for row in alphabet_data.rows}
@@ -295,34 +297,26 @@ def _select_rule(rules: list[Rule], rule_id: str | None) -> Rule:
     raise typer.BadParameter(f"Unknown rule id: {rule_id!r}")
 
 
-@app.command("validate")
-def validate(
-    input_path: Path = typer.Argument(
+validate_app = typer.Typer(
+    help="Validate rules, alphabet, or input words."
+)
+app.add_typer(validate_app, name="validate")
+
+
+@validate_app.command("rules")
+def validate_rules(
+    rules: Path = typer.Argument(
         ...,
         exists=True,
         dir_okay=False,
         readable=True,
-        help="Rules JSON/TOML or alphabet CSV/TSV file to validate.",
+        help="Rules JSON/TOML file to validate.",
     ),
-    kind: str | None = typer.Option(
-        None,
-        "--kind",
-        "-k",
-        help="Validation kind: rules, alphabet, or input (auto-detect if omitted).",
-    ),
-    alphabet: Path | None = typer.Option(
-        None,
-        "--alphabet",
-        "-a",
+    alphabet: Path = typer.Argument(
+        ...,
         dir_okay=False,
         readable=True,
-        help="Alphabet CSV/TSV file required for rules validation.",
-    ),
-    delimiter: str | None = typer.Option(
-        None,
-        "--delimiter",
-        "-d",
-        help="Override the delimiter for alphabet files (default: detect).",
+        help="Alphabet CSV/TSV file for rule validation.",
     ),
     quiet: bool = typer.Option(
         False,
@@ -341,92 +335,109 @@ def validate(
         help="Print estimated states/arcs for the compiled FST.",
     ),
 ) -> None:
-    """Validate a rules JSON/TOML, alphabet CSV/TSV, or input words file."""
-    kind_value = kind.lower() if kind else None
-    if kind_value is None:
-        if input_path.suffix.lower() in {".json", ".toml"}:
-            try:
-                if input_path.suffix.lower() == ".json":
-                    payload = _load_json(input_path)
-                else:
-                    payload = _load_toml(input_path)
-            except typer.BadParameter:
-                payload = None
-            if isinstance(payload, dict) and "rules" in payload:
-                kind_value = "rules"
-            elif isinstance(payload, list):
-                kind_value = "input"
-            elif isinstance(payload, dict) and "inputs" in payload:
-                kind_value = "input"
-            else:
-                raise typer.BadParameter(
-                    "Unable to infer JSON/TOML kind; use --kind."
-                )
-        else:
-            kind_value = "alphabet"
+    """Validate a rules JSON/TOML file."""
+    rules_file = _validate_rules_file(rules, alphabet)
+    rules_list = rules_file.rules
+    if dump_vp or fst_stats:
+        from .feature_analysis import compute_p_features, compute_v_features
 
-    if kind_value == "rules":
-        rules_file = _validate_rules_file(input_path, alphabet)
-        rules = rules_file.rules
-        if dump_vp or fst_stats:
-            from .feature_analysis import compute_p_features, compute_v_features
-            if alphabet is None:
-                raise typer.BadParameter(
-                    "--dump-vp/--fst-stats requires --alphabet."
+        alphabet_features = _load_alphabet_features(alphabet)
+        for rule in rules_list:
+            v_features = sorted(
+                compute_v_features(
+                    rule, alphabet_features=alphabet_features
                 )
-            alphabet_features = _load_alphabet_features(alphabet)
-
-            for rule in rules:
-                v_features = sorted(
-                    compute_v_features(
-                        rule, alphabet_features=alphabet_features
-                    )
-                )
-                p_features = sorted(
-                    compute_p_features(
-                        rule, alphabet_features=alphabet_features
-                    )
-                )
-                if dump_vp:
-                    typer.echo(f"{rule.id} V: {', '.join(v_features)}")
-                    typer.echo(f"{rule.id} P: {', '.join(p_features)}")
-                if fst_stats:
-                    v_size = len(v_features)
-                    p_size = len(p_features)
-                    state_count = 1 + (3 ** p_size)
-                    arc_count = state_count * (3 ** v_size)
-                    typer.echo(
-                        f"{rule.id} states: {state_count} arcs: {arc_count}"
-                    )
-    elif kind_value == "alphabet":
-        if dump_vp or fst_stats:
-            raise typer.BadParameter(
-                "--dump-vp/--fst-stats is only valid for rules validation."
             )
-        _table_to_json(input_path, delimiter)
-    elif kind_value == "input":
-        if dump_vp or fst_stats:
-            raise typer.BadParameter(
-                "--dump-vp/--fst-stats is only valid for rules validation."
+            p_features = sorted(
+                compute_p_features(
+                    rule, alphabet_features=alphabet_features
+                )
             )
-        _validate_input_words(input_path, alphabet)
-    else:
-        raise typer.BadParameter(
-            "Invalid --kind. Use 'rules', 'alphabet', or 'input'."
-        )
+            if dump_vp:
+                typer.echo(f"{rule.id} V: {', '.join(v_features)}")
+                typer.echo(f"{rule.id} P: {', '.join(p_features)}")
+            if fst_stats:
+                v_size = len(v_features)
+                p_size = len(p_features)
+                state_count = 1 + (3 ** p_size)
+                arc_count = state_count * (3 ** v_size)
+                typer.echo(
+                    f"{rule.id} states: {state_count} arcs: {arc_count}"
+                )
+    if not quiet:
+        typer.echo("OK")
 
+
+@validate_app.command("alphabet")
+def validate_alphabet(
+    alphabet: Path = typer.Argument(
+        ...,
+        exists=True,
+        dir_okay=False,
+        readable=True,
+        help="Alphabet CSV/TSV file to validate.",
+    ),
+    delimiter: str | None = typer.Option(
+        None,
+        "--delimiter",
+        "-d",
+        help="Override the delimiter for alphabet files (default: detect).",
+    ),
+    quiet: bool = typer.Option(
+        False,
+        "--quiet",
+        "-q",
+        help="Suppress success output.",
+    ),
+) -> None:
+    """Validate an alphabet CSV/TSV file."""
+    _table_to_json(alphabet, delimiter)
+    if not quiet:
+        typer.echo("OK")
+
+
+@validate_app.command("input")
+def validate_input(
+    input_words: Path = typer.Argument(
+        ...,
+        exists=True,
+        dir_okay=False,
+        readable=True,
+        help="Input JSON/TOML words file (each word is an array of symbols).",
+    ),
+    alphabet: Path = typer.Argument(
+        ...,
+        dir_okay=False,
+        readable=True,
+        help="Alphabet CSV/TSV file for input validation.",
+    ),
+    quiet: bool = typer.Option(
+        False,
+        "--quiet",
+        "-q",
+        help="Suppress success output.",
+    ),
+) -> None:
+    """Validate an input word list."""
+    _validate_input_words(input_words, alphabet)
     if not quiet:
         typer.echo("OK")
 
 
 @app.command("compile")
 def compile_rule(
-    rules_path: Path = typer.Argument(
+    rules: Path = typer.Argument(
         ...,
         exists=True,
         dir_okay=False,
         readable=True,
         help="Rules JSON/TOML file to compile.",
+    ),
+    alphabet: Path = typer.Argument(
+        ...,
+        dir_okay=False,
+        readable=True,
+        help="Alphabet CSV/TSV file for rule validation.",
     ),
     output: Path = typer.Argument(
         ...,
@@ -438,14 +449,6 @@ def compile_rule(
         None,
         "--rule-id",
         help="Rule id to compile (required if multiple rules).",
-    ),
-    alphabet: Path = typer.Option(
-        ...,
-        "--alphabet",
-        "-a",
-        dir_okay=False,
-        readable=True,
-        help="Alphabet CSV/TSV file for rule validation.",
     ),
     symtab: Path | None = typer.Option(
         None,
@@ -486,17 +489,17 @@ def compile_rule(
     reversing input/output at evaluation time.
     This command requires Pynini/pywrapfst.
     """
-    payload = _load_rules_payload(rules_path)
+    payload = _load_rules_payload(rules)
     try:
         rules_file = RulesFile.model_validate(payload)
     except ValidationError as exc:
         raise typer.BadParameter(format_validation_error(exc)) from exc
-    rules = rules_file.rules
+    rules_list = rules_file.rules
 
     from .feature_analysis import compute_p_features, compute_v_features
 
     features = _load_alphabet_features(alphabet)
-    for rule in rules:
+    for rule in rules_list:
         _validate_rule_features(rule, features, "inr")
         _validate_rule_features(rule, features, "trm")
         _validate_rule_features(rule, features, "cnd")
@@ -513,9 +516,9 @@ def compile_rule(
             ) from exc
 
     if rule_id is not None:
-        selected_rules = [_select_rule(rules, rule_id)]
+        selected_rules = [_select_rule(rules_list, rule_id)]
     else:
-        selected_rules = list(rules)
+        selected_rules = list(rules_list)
 
     if len(selected_rules) > 1:
         if output.suffix:
@@ -593,14 +596,20 @@ def compile_rule(
 
 @app.command("eval")
 def eval_rule(
-    rules_path: Path = typer.Argument(
+    rules: Path = typer.Argument(
         ...,
         exists=True,
         dir_okay=False,
         readable=True,
         help="Rules JSON/TOML file to evaluate.",
     ),
-    input_path: Path = typer.Argument(
+    alphabet: Path = typer.Argument(
+        ...,
+        dir_okay=False,
+        readable=True,
+        help="Alphabet CSV/TSV file used to map symbols to bundles.",
+    ),
+    input_words: Path = typer.Argument(
         ...,
         exists=True,
         dir_okay=False,
@@ -619,14 +628,6 @@ def eval_rule(
         None,
         "--rule-id",
         help="Rule id to evaluate (required if multiple rules).",
-    ),
-    alphabet: Path | None = typer.Option(
-        None,
-        "--alphabet",
-        "-a",
-        dir_okay=False,
-        readable=True,
-        help="Alphabet CSV/TSV file used to map symbols to bundles.",
     ),
     include_input: bool = typer.Option(
         False,
@@ -666,21 +667,18 @@ def eval_rule(
     The compiled machine is canonical LEFT; RIGHT rules are evaluated by
     reversing input/output around the machine.
     """
+    rules_path = rules
     payload = _load_rules_payload(rules_path)
     try:
         rules_file = RulesFile.model_validate(payload)
     except ValidationError as exc:
         raise typer.BadParameter(format_validation_error(exc)) from exc
-    rules = rules_file.rules
+    rules_list = rules_file.rules
 
-    if alphabet is None:
-        raise typer.BadParameter(
-            "Evaluation requires an alphabet; pass --alphabet."
-        )
     alphabet_data = _load_alphabet(alphabet)
     feature_order = tuple(alphabet_data.feature_schema.features)
     features = set(feature_order)
-    for rule in rules:
+    for rule in rules_list:
         _validate_rule_features(rule, features, "inr")
         _validate_rule_features(rule, features, "trm")
         _validate_rule_features(rule, features, "cnd")
@@ -699,10 +697,10 @@ def eval_rule(
     from .feature_analysis import compute_p_features, compute_v_features
 
     if rule_id is not None:
-        selected_rules = [_select_rule(rules, rule_id)]
+        selected_rules = [_select_rule(rules_list, rule_id)]
     else:
-        selected_rules = list(rules)
-    segments = _load_input_payload(input_path)
+        selected_rules = list(rules_list)
+    segments = _load_input_payload(input_words)
 
     symbol_to_bundle: dict[str, dict[str, str]] = {}
     bundle_to_symbol: dict[tuple[str, ...], str] = {}
@@ -715,8 +713,8 @@ def eval_rule(
             )
         bundle_to_symbol[bundle_key] = row.symbol
 
-    if compare and not pynini:
-        raise typer.BadParameter("--compare requires --pynini.")
+    if compare:
+        pynini = True
 
     current_words = segments
     table_rows: list[dict[str, object]] = []
