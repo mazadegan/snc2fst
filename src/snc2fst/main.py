@@ -494,7 +494,8 @@ def compile_rule(
     reversing input/output at evaluation time.
     This command requires Pynini/pywrapfst.
     """
-    payload = _load_rules_payload(rules)
+    rules_path = rules
+    payload = _load_rules_payload(rules_path)
     try:
         rules_file = RulesFile.model_validate(payload)
     except ValidationError as exc:
