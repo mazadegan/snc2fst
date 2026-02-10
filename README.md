@@ -402,6 +402,16 @@ pytest --stress-test \
   --stress-max-len 20
 ```
 
+## Release (Conda)
+
+Build and upload the conda package to Anaconda.org:
+
+```
+conda build conda
+anaconda login
+anaconda upload /path/to/conda-bld/<platform>/snc2fst-<version>-*.conda
+```
+
 ## Backends
 
 `eval` can run two backends:
