@@ -16,7 +16,7 @@ from .rules import RulesFile, Rule
 from .compile_pynini_fst import (
     compile_pynini_fst,
     evaluate_with_pynini,
-    to_gallic_like,
+    to_optimal,
     write_att_pynini,
 )
 
@@ -554,7 +554,7 @@ def compile_rule(
         if optimize:
             before_counts = _count_fst_states_arcs(machine.fst)
         if optimize:
-            machine = to_gallic_like(machine)
+            machine = to_optimal(machine)
             after_counts = _count_fst_states_arcs(machine.fst)
             if before_counts == after_counts:
                 typer.echo(

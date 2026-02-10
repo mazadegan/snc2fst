@@ -138,7 +138,7 @@ def write_pynini_fst(
     machine.fst.write(str(fst_path))
 
 
-def to_gallic_like(machine: PyniniMachine) -> PyniniMachine:
+def to_optimal(machine: PyniniMachine) -> PyniniMachine:
     try:
         import pynini
         import tempfile
