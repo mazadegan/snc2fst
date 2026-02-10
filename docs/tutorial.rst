@@ -71,6 +71,7 @@ Validation requires the alphabet:
 
    snc2fst validate rules samples/rules.toml samples/alphabet.csv
    snc2fst validate input samples/input.toml samples/alphabet.csv
+   snc2fst validate alphabet samples/alphabet.csv
 
 Compile a Rule
 --------------
