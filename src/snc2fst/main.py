@@ -482,6 +482,11 @@ def compile_rule(
         "--optimize",
         help="Optimize the compiled FST (determinize -> push -> minimize).",
     ),
+    no_epsilon: bool = typer.Option(
+        False,
+        "--no-epsilon",
+        help="Fail if the optimized FST contains any epsilon transitions.",
+    ),
 ) -> None:
     """Compile a single rule into AT&T text format (always writes .att and .sym).
 
@@ -556,13 +561,19 @@ def compile_rule(
         before_counts = None
         if optimize:
             before_counts = _count_fst_states_arcs(machine.fst)
-        if optimize:
             machine = to_optimal(machine)
             after_counts = _count_fst_states_arcs(machine.fst)
             if before_counts == after_counts:
                 typer.echo(
                     "optimize: no reduction in states/arcs after determinize/push/minimize"
                 )
+        if no_epsilon and _has_epsilon_arcs(machine.fst):
+            raise typer.BadParameter(
+                "FST contains epsilon transitions; "
+                "remove epsilons or omit --no-epsilon."
+            )
+        if no_epsilon:
+            typer.echo("no-epsilon: 0 epsilons found")
         if progress:
             typer.echo("writing output...")
 
@@ -1049,6 +1060,14 @@ def _count_fst_states_arcs(fst_obj: object) -> tuple[int, int]:
         state_count += 1
         arc_count += sum(1 for _ in fst_obj.arcs(state))
     return state_count, arc_count
+
+
+def _has_epsilon_arcs(fst_obj: object) -> bool:
+    for state in fst_obj.states():
+        for arc in fst_obj.arcs(state):
+            if arc.ilabel == 0 or arc.olabel == 0:
+                return True
+    return False
 
 
 def _evaluate_with_reference(

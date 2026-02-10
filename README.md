@@ -198,6 +198,12 @@ Optimize the compiled FST before writing output:
 snc2fst compile samples/rules.toml samples/alphabet.csv samples/rule.att --optimize
 ```
 
+Fail if the optimized FST contains epsilon transitions:
+
+```
+snc2fst compile samples/rules.toml samples/alphabet.csv samples/rule.att --no-epsilon
+```
+
 When the rules file contains multiple rules, omit `--rule-id` to compile all
 of them. In that case, `output` is treated as a directory and each rule is
 written as `{rule_id}.att`, `{rule_id}.sym`, and (if `--fst` is set)

@@ -52,3 +52,4 @@ def pytest_collection_modifyitems(
     for item in items:
         if "stress" in item.keywords:
             item.add_marker(skip_stress)
+

@@ -94,6 +94,15 @@ Optimize the compiled FST before writing output:
 
    snc2fst compile samples/rules.toml samples/alphabet.csv samples/rule.att --optimize
 
+Fail if the optimized FST contains epsilon transitions:
+
+.. code-block:: bash
+
+   snc2fst compile samples/rules.toml samples/alphabet.csv samples/rule.att --no-epsilon
+
+This check runs on the final compiled FST; if ``--optimize`` is enabled, it runs
+after determinize → push → minimize.
+
 Evaluate Input
 --------------
 
