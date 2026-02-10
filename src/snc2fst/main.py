@@ -477,7 +477,7 @@ def compile_rule(
     optimize: bool = typer.Option(
         False,
         "--optimize",
-        help="Optimize the compiled FST (determinize/push/minimize).",
+        help="Optimize the compiled FST (determinize -> push -> minimize).",
     ),
 ) -> None:
     """Compile a single rule into AT&T text format (always writes .att and .sym).

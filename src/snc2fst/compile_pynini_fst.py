@@ -146,10 +146,19 @@ def to_optimal(machine: PyniniMachine) -> PyniniMachine:
         raise typer.BadParameter(
             "Pynini not available; install pynini to use --optimize."
         ) from exc
-
+    
     with tempfile.NamedTemporaryFile(suffix=".fst", delete=True) as tmp:
         machine.fst.write(tmp.name)
-        optimized = pynini.optimize(pynini.Fst.read(tmp.name))
+        optimized = pynini.Fst.read(tmp.name)
+    optimized = pynini.determinize(optimized)
+    optimized = pynini.push(
+        optimized,
+        push_weights=True,
+        push_labels=True,
+        remove_common_affix=True,
+        reweight_type="to_initial",
+    )
+    optimized = pynini.minimize(optimized)
     return PyniniMachine(
         fst=optimized,
         v_order=machine.v_order,
