@@ -477,6 +477,12 @@ def compile_rule(
         "-p",
         help="Show a progress bar during compilation.",
     ),
+    verbose: bool = typer.Option(
+        False,
+        "--verbose",
+        "-v",
+        help="Show extra optimization details.",
+    ),
     optimize: bool = typer.Option(
         False,
         "--optimize",
@@ -546,10 +552,11 @@ def compile_rule(
 
     total_rules = len(selected_rules)
     for idx, rule in enumerate(selected_rules, start=1):
-        if total_rules > 1:
-            typer.echo(
-                f"[{idx}/{total_rules}] compiling {rule.id}..."
-            )
+        prefix = (
+            f"[{idx}/{total_rules}] {rule.id}"
+            if total_rules > 1
+            else f"{rule.id}"
+        )
         _enforce_arc_limit(rule, max_arcs, alphabet_features=features)
         v_features = compute_v_features(rule, alphabet_features=features)
         p_features = compute_p_features(rule, alphabet_features=features)
@@ -565,16 +572,16 @@ def compile_rule(
             machine = to_optimal(machine)
             after_counts = _count_fst_states_arcs(machine.fst)
             if before_counts == after_counts:
-                typer.echo(
-                    "optimize: no reduction in states/arcs after determinize/push/minimize"
-                )
+                if verbose:
+                    typer.echo(
+                        "optimize: no reduction in states/arcs after determinize/push/minimize"
+                    )
         if no_epsilon and _has_epsilon_arcs(machine.fst):
             raise typer.BadParameter(
                 "FST contains epsilon transitions; "
                 "remove epsilons or omit --no-epsilon."
             )
-        if no_epsilon:
-            typer.echo("no-epsilon: 0 epsilons found")
+        no_eps_label = "no-eps" if no_epsilon else None
         if progress:
             typer.echo("writing output...")
 
@@ -597,13 +604,16 @@ def compile_rule(
                 fst_out = output_dir / f"{rule.id}.fst"
                 machine.fst.write(str(fst_out))
         state_count, arc_count = _count_fst_states_arcs(machine.fst)
-        typer.echo(
-            f"done. states={state_count} arcs={arc_count}"
-        )
-        typer.echo(f"att: {att_path}")
-        typer.echo(f"symtab: {symtab_path}")
+        parts = [
+            prefix,
+            f"states={state_count} arcs={arc_count}",
+            f"att={att_path} sym={symtab_path}",
+        ]
         if fst:
-            typer.echo(f"fst: {fst_out}")
+            parts.append(f"fst={fst_out}")
+        if no_eps_label:
+            parts.append(no_eps_label)
+        typer.echo(" | ".join(parts))
 
 
 @app.command("eval")
