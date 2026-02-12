@@ -1,6 +1,6 @@
 [project]
 name = "snc2fst"
-version = "0.2.1"
+version = "0.2.2"
 description = "Compiles Search-and-Change grammars to OpenFST transducers."
 readme = "README.md"
 license = { text = "Apache-2.0" }
