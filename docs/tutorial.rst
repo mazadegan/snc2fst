@@ -88,20 +88,20 @@ Write a binary FST alongside the AT&T output:
 
    snc2fst compile samples/rules.toml samples/alphabet.csv samples/rule.att --fst
 
-Optimize the compiled FST before writing output:
+Normalize the compiled FST before writing output:
 
 .. code-block:: bash
 
-   snc2fst compile samples/rules.toml samples/alphabet.csv samples/rule.att --optimize
+   snc2fst compile samples/rules.toml samples/alphabet.csv samples/rule.att --normalize
 
-Fail if the optimized FST contains epsilon transitions:
+Fail if the normalized FST contains epsilon transitions:
 
 .. code-block:: bash
 
    snc2fst compile samples/rules.toml samples/alphabet.csv samples/rule.att --no-epsilon
 
-This check runs on the final compiled FST; if ``--optimize`` is enabled, it runs
-after determinize → push → minimize.
+This check runs on the final compiled FST; if ``--normalize`` is enabled, it runs
+after determinize → minimize.
 
 Evaluate Input
 --------------

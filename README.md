@@ -192,13 +192,13 @@ Compile and also emit a binary FST (requires `pynini`):
 snc2fst compile samples/rules.toml samples/alphabet.csv samples/rule.att --fst
 ```
 
-Optimize the compiled FST before writing output:
+Normalize the compiled FST before writing output:
 
 ```
-snc2fst compile samples/rules.toml samples/alphabet.csv samples/rule.att --optimize
+snc2fst compile samples/rules.toml samples/alphabet.csv samples/rule.att --normalize
 ```
 
-Fail if the optimized FST contains epsilon transitions:
+Fail if the normalized FST contains epsilon transitions:
 
 ```
 snc2fst compile samples/rules.toml samples/alphabet.csv samples/rule.att --no-epsilon

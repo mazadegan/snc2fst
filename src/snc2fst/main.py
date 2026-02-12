@@ -483,15 +483,16 @@ def compile_rule(
         "-v",
         help="Show extra optimization details.",
     ),
-    optimize: bool = typer.Option(
+    normalize: bool = typer.Option(
         False,
-        "--optimize",
-        help="Optimize the compiled FST (determinize -> push -> minimize).",
+        "--normalize",
+        "-n",
+        help="Normalize the compiled FST (determinize -> minimize).",
     ),
     no_epsilon: bool = typer.Option(
         False,
         "--no-epsilon",
-        help="Fail if the optimized FST contains any epsilon transitions.",
+        help="Fail if the normalized FST contains any epsilon transitions.",
     ),
 ) -> None:
     """Compile a single rule into AT&T text format (always writes .att and .sym).
@@ -567,14 +568,14 @@ def compile_rule(
             p_features=p_features,
         )
         before_counts = None
-        if optimize:
+        if normalize:
             before_counts = _count_fst_states_arcs(machine.fst)
             machine = to_optimal(machine)
             after_counts = _count_fst_states_arcs(machine.fst)
             if before_counts == after_counts:
                 if verbose:
                     typer.echo(
-                        "optimize: no reduction in states/arcs after determinize/push/minimize"
+                        "normalize: no reduction in states/arcs after determinize/minimize"
                     )
         if no_epsilon and _has_epsilon_arcs(machine.fst):
             raise typer.BadParameter(
@@ -589,8 +590,8 @@ def compile_rule(
             att_path = output
         else:
             att_path = output_dir / f"{rule.id}.att"
-        if optimize:
-            att_path = att_path.with_suffix(".opt.att")
+        if normalize:
+            att_path = att_path.with_suffix(".norm.att")
         if symtab is not None and output_dir is None:
             symtab_path = symtab
         else:

@@ -144,20 +144,13 @@ def to_optimal(machine: PyniniMachine) -> PyniniMachine:
         import tempfile
     except ImportError as exc:  # pragma: no cover - optional dependency
         raise typer.BadParameter(
-            "Pynini not available; install pynini to use --optimize."
+            "Pynini not available; install pynini to use --normalize."
         ) from exc
     
     with tempfile.NamedTemporaryFile(suffix=".fst", delete=True) as tmp:
         machine.fst.write(tmp.name)
         optimized = pynini.Fst.read(tmp.name)
     optimized = pynini.determinize(optimized)
-    optimized = pynini.push(
-        optimized,
-        push_weights=True,
-        push_labels=True,
-        remove_common_affix=True,
-        reweight_type="to_initial",
-    )
     optimized = pynini.minimize(optimized)
     return PyniniMachine(
         fst=optimized,
