@@ -9,7 +9,7 @@ from typer.testing import CliRunner
 SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(SRC_ROOT))
 
-from snc2fst.main import app
+from snc2fst.main import app  # noqa: E402
 
 
 @pytest.mark.smoke

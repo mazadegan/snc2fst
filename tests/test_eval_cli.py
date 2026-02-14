@@ -9,7 +9,7 @@ from typer.testing import CliRunner
 SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(SRC_ROOT))
 
-from snc2fst.main import app
+from snc2fst.main import app  # noqa: E402
 
 
 def test_eval_cli_outputs_json(tmp_path: Path) -> None:
@@ -19,8 +19,8 @@ def test_eval_cli_outputs_json(tmp_path: Path) -> None:
             {
                 "id": "spread_voice_right",
                 "dir": "RIGHT",
-                "inr": [["+","Voice"]],
-                "trm": [["+","Consonantal"]],
+                "inr": [["+", "Voice"]],
+                "trm": [["+", "Consonantal"]],
                 "cnd": [],
                 "out": "(bundle (- Voice))",
             }
@@ -75,8 +75,8 @@ def test_eval_cli_non_strict_emits_bundle(tmp_path: Path) -> None:
             {
                 "id": "spread_voice_right",
                 "dir": "RIGHT",
-                "inr": [["+","Voice"]],
-                "trm": [["+","Consonantal"]],
+                "inr": [["+", "Voice"]],
+                "trm": [["+", "Consonantal"]],
                 "cnd": [],
                 "out": "(proj TRM (Voice))",
             }
@@ -132,8 +132,8 @@ def test_eval_cli_pynini_compare_right_rule(tmp_path: Path) -> None:
             {
                 "id": "spread_voice_right",
                 "dir": "RIGHT",
-                "inr": [["+","Voice"]],
-                "trm": [["+","Consonantal"]],
+                "inr": [["+", "Voice"]],
+                "trm": [["+", "Consonantal"]],
                 "cnd": [],
                 "out": "(proj TRM (Voice))",
             }
@@ -178,8 +178,8 @@ def test_eval_cli_dump_vp(tmp_path: Path) -> None:
             {
                 "id": "spread_voice_right",
                 "dir": "RIGHT",
-                "inr": [["+","Voice"]],
-                "trm": [["+","Consonantal"]],
+                "inr": [["+", "Voice"]],
+                "trm": [["+", "Consonantal"]],
                 "cnd": [],
                 "out": "(proj TRM (Voice))",
             }

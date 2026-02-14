@@ -7,9 +7,9 @@ import pytest
 SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(SRC_ROOT))
 
-from snc2fst.feature_analysis import compute_p_features, compute_v_features
-from snc2fst.compile_pynini_fst import compile_pynini_fst, evaluate_with_pynini
-from snc2fst.rules import Rule
+from snc2fst.feature_analysis import compute_p_features, compute_v_features  # noqa: E402
+from snc2fst.compile_pynini_fst import compile_pynini_fst, evaluate_with_pynini  # noqa: E402
+from snc2fst.rules import Rule  # noqa: E402
 
 
 pytest.importorskip("pywrapfst")
@@ -40,8 +40,8 @@ def test_evaluate_with_pynini_matches_reference_small() -> None:
             {
                 "id": "spread_voice_right",
                 "dir": "RIGHT",
-                "inr": [["+","Voice"]],
-                "trm": [["+","Consonantal"]],
+                "inr": [["+", "Voice"]],
+                "trm": [["+", "Consonantal"]],
                 "cnd": [],
                 "out": "(proj TRM (Voice))",
             }
@@ -87,7 +87,7 @@ def test_evaluate_with_pynini_reconstructs_non_v_features() -> None:
         id="r_recon",
         dir="LEFT",
         inr=[],
-        trm=[["+","Voice"]],
+        trm=[["+", "Voice"]],
         cnd=[],
         out="(proj TRM (Voice))",
     )

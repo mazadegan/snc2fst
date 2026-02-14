@@ -7,7 +7,7 @@ import pytest
 SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(SRC_ROOT))
 
-from snc2fst.out_dsl import OutDslError, evaluate_out_dsl
+from snc2fst.out_dsl import OutDslError, evaluate_out_dsl  # noqa: E402
 
 
 def test_evaluate_out_dsl_complex_expression() -> None:

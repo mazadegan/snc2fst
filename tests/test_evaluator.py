@@ -5,8 +5,8 @@ from pathlib import Path
 SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(SRC_ROOT))
 
-from snc2fst.evaluator import evaluate_rule_on_bundles
-from snc2fst.rules import Rule
+from snc2fst.evaluator import evaluate_rule_on_bundles  # noqa: E402
+from snc2fst.rules import Rule  # noqa: E402
 
 
 def test_evaluate_rule_right_direction() -> None:

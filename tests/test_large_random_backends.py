@@ -10,9 +10,9 @@ import pytest
 SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(SRC_ROOT))
 
-from snc2fst.feature_analysis import compute_v_features
-from snc2fst.main import _evaluate_with_pynini, _evaluate_with_reference
-from snc2fst.rules import Rule
+from snc2fst.feature_analysis import compute_v_features  # noqa: E402
+from snc2fst.main import _evaluate_with_pynini, _evaluate_with_reference  # noqa: E402
+from snc2fst.rules import Rule  # noqa: E402
 
 
 def _random_rule(rng: random.Random, idx: int) -> Rule:

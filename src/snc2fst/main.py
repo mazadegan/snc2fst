@@ -20,7 +20,6 @@ from .compile_pynini_fst import (
     write_att_pynini,
 )
 
-
 app = typer.Typer(add_completion=False)
 
 
@@ -144,9 +143,7 @@ def _load_rules_payload(path: Path) -> dict:
     elif suffix == ".toml":
         payload = _load_toml(path)
     else:
-        raise typer.BadParameter(
-            "Rules file must be a .json or .toml file."
-        )
+        raise typer.BadParameter("Rules file must be a .json or .toml file.")
     if not isinstance(payload, dict):
         raise typer.BadParameter(
             "Rules file must be an object/table with a 'rules' array."
@@ -183,16 +180,12 @@ def _load_input_payload(path: Path) -> list[object]:
                 "Input TOML must define 'inputs' as an array of words."
             )
         return inputs
-    raise typer.BadParameter(
-        "Input file must be a .json or .toml file."
-    )
+    raise typer.BadParameter("Input file must be a .json or .toml file.")
 
 
 def _load_alphabet_features(alphabet_path: Path) -> set[str]:
     if alphabet_path.suffix.lower() not in {".csv", ".tsv", ".tab"}:
-        raise typer.BadParameter(
-            "Alphabet must be a CSV/TSV feature table."
-        )
+        raise typer.BadParameter("Alphabet must be a CSV/TSV feature table.")
     payload = json.loads(_table_to_json(alphabet_path, delimiter=None))
     try:
         alphabet = Alphabet.model_validate(payload)
@@ -203,9 +196,7 @@ def _load_alphabet_features(alphabet_path: Path) -> set[str]:
 
 def _load_alphabet(alphabet_path: Path) -> Alphabet:
     if alphabet_path.suffix.lower() not in {".csv", ".tsv", ".tab"}:
-        raise typer.BadParameter(
-            "Alphabet must be a CSV/TSV feature table."
-        )
+        raise typer.BadParameter("Alphabet must be a CSV/TSV feature table.")
     payload = json.loads(_table_to_json(alphabet_path, delimiter=None))
     try:
         return Alphabet.model_validate(payload)
@@ -305,9 +296,7 @@ def _select_rule(rules: list[Rule], rule_id: str | None) -> Rule:
     raise typer.BadParameter(f"Unknown rule id: {rule_id!r}")
 
 
-validate_app = typer.Typer(
-    help="Validate rules, alphabet, or input words."
-)
+validate_app = typer.Typer(help="Validate rules, alphabet, or input words.")
 app.add_typer(validate_app, name="validate")
 
 
@@ -352,14 +341,10 @@ def validate_rules(
         alphabet_features = _load_alphabet_features(alphabet)
         for rule in rules_list:
             v_features = sorted(
-                compute_v_features(
-                    rule, alphabet_features=alphabet_features
-                )
+                compute_v_features(rule, alphabet_features=alphabet_features)
             )
             p_features = sorted(
-                compute_p_features(
-                    rule, alphabet_features=alphabet_features
-                )
+                compute_p_features(rule, alphabet_features=alphabet_features)
             )
             if dump_vp:
                 typer.echo(f"{rule.id} V: {', '.join(v_features)}")
@@ -367,8 +352,8 @@ def validate_rules(
             if fst_stats:
                 v_size = len(v_features)
                 p_size = len(p_features)
-                state_count = 1 + (3 ** p_size)
-                arc_count = state_count * (3 ** v_size)
+                state_count = 1 + (3**p_size)
+                arc_count = state_count * (3**v_size)
                 typer.echo(
                     f"{rule.id} states: {state_count} arcs: {arc_count}"
                 )
@@ -781,9 +766,7 @@ def eval_rule(
                 }
             )
         else:
-            table_rows.append(
-                {"rule_id": rule.id, "outputs": output_words}
-            )
+            table_rows.append({"rule_id": rule.id, "outputs": output_words})
 
         current_words = output_words
 
@@ -883,7 +866,6 @@ def init_samples(
             )
 
     features = ["F1", "F2", "F3"]
-    digits = [0, 1, 2]
     symbols = ["0"] + [chr(code) for code in range(ord("A"), ord("Z") + 1)]
     value_map = {0: "0", 1: "+", 2: "-"}
     header = "," + ",".join(symbols)
@@ -891,7 +873,7 @@ def init_samples(
     for idx, feature in enumerate(features):
         values = []
         for sym_index in range(len(symbols)):
-            digit = (sym_index // (3 ** idx)) % 3
+            digit = (sym_index // (3**idx)) % 3
             values.append(value_map[digit])
         rows.append(f"{feature}," + ",".join(values))
     alphabet_path.write_text("\n".join(rows) + "\n", encoding="utf-8")
@@ -915,12 +897,14 @@ def init_samples(
     input_text = "inputs = " + _format_word_list(input_words).rstrip() + "\n"
     input_path.write_text(input_text, encoding="utf-8")
     base = Path.cwd().resolve()
+
     def _relpath(path: Path) -> Path:
         resolved = path.resolve()
         try:
             return resolved.relative_to(base)
         except ValueError:
             return resolved
+
     typer.echo("OK")
     typer.echo(f"alphabet: {_relpath(alphabet_path)}")
     typer.echo(f"rules: {_relpath(rules_path)}")
@@ -942,6 +926,7 @@ def _format_word_list(words: list[list[object]]) -> str:
         lines.append(f'  [{",".join(rendered_items)}]{suffix}')
     lines.append("]")
     return "\n".join(lines) + "\n"
+
 
 def _format_word_inline(word: list[object]) -> str:
     rendered_items: list[str] = []
@@ -982,13 +967,9 @@ def _enforce_arc_limit(
 ) -> None:
     from .feature_analysis import compute_p_features, compute_v_features
 
-    v_size = len(
-        compute_v_features(rule, alphabet_features=alphabet_features)
-    )
-    p_size = len(
-        compute_p_features(rule, alphabet_features=alphabet_features)
-    )
-    arc_count = (1 + (3 ** p_size)) * (3 ** v_size)
+    v_size = len(compute_v_features(rule, alphabet_features=alphabet_features))
+    p_size = len(compute_p_features(rule, alphabet_features=alphabet_features))
+    arc_count = (1 + (3**p_size)) * (3**v_size)
     if arc_count > max_arcs:
         raise typer.BadParameter(
             "Estimated arcs exceed --max-arcs: "

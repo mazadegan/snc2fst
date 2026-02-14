@@ -9,9 +9,10 @@ from typer.testing import CliRunner
 SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(SRC_ROOT))
 
-from snc2fst.main import app
+from snc2fst.main import app  # noqa: E402
 
 pytest.importorskip("pywrapfst")
+
 
 def _write_alphabet_csv(
     path: Path, *, symbols: list[str], features: list[str]
@@ -30,12 +31,12 @@ def test_compile_writes_att_and_symtab(tmp_path: Path) -> None:
             {
                 "id": "spread_voice_right",
                 "dir": "RIGHT",
-                "inr": [["+","Voice"]],
-                "trm": [["+","Consonantal"]],
+                "inr": [["+", "Voice"]],
+                "trm": [["+", "Consonantal"]],
                 "cnd": [],
                 "out": "(unify (subtract (proj TRM *) (proj TRM (Voice))) (proj INR (Voice)))",
             }
-        ]
+        ],
     }
     rules_path = tmp_path / "rules.json"
     rules_path.write_text(json.dumps(rules), encoding="utf-8")
@@ -65,6 +66,7 @@ def test_compile_writes_att_and_symtab(tmp_path: Path) -> None:
     assert output_path.read_text(encoding="utf-8").strip()
     assert symtab_path.read_text(encoding="utf-8").strip()
 
+
 def test_compile_outputs_expected_att_and_symtab(tmp_path: Path) -> None:
     rules = {
         "id": "rules",
@@ -77,7 +79,7 @@ def test_compile_outputs_expected_att_and_symtab(tmp_path: Path) -> None:
                 "cnd": [],
                 "out": "(proj INR *)",
             }
-        ]
+        ],
     }
     rules_path = tmp_path / "rules.json"
     rules_path.write_text(json.dumps(rules), encoding="utf-8")
@@ -138,12 +140,12 @@ def test_compile_respects_max_arcs(tmp_path: Path) -> None:
             {
                 "id": "spread_voice_right",
                 "dir": "RIGHT",
-                "inr": [["+","Voice"]],
-                "trm": [["+","Consonantal"]],
+                "inr": [["+", "Voice"]],
+                "trm": [["+", "Consonantal"]],
                 "cnd": [],
                 "out": "(proj TRM (Voice))",
             }
-        ]
+        ],
     }
     rules_path = tmp_path / "rules.json"
     rules_path.write_text(json.dumps(rules), encoding="utf-8")

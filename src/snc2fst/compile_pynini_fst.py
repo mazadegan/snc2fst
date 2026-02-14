@@ -132,7 +132,7 @@ def to_optimal(machine: PyniniMachine) -> PyniniMachine:
         raise typer.BadParameter(
             "Pynini not available; install pynini to use --normalize."
         ) from exc
-    
+
     with tempfile.NamedTemporaryFile(suffix=".fst", delete=True) as tmp:
         machine.fst.write(tmp.name)
         optimized = pynini.Fst.read(tmp.name)
@@ -265,7 +265,8 @@ def evaluate_with_pynini(
         output_words.append(output_syms)
     return output_words
 
-def _pynini_linear_fst(labels: list[int], fst) -> "fst.Fst":
+
+def _pynini_linear_fst(labels: list[int], fst: object) -> object:
     f = fst.VectorFst()
     start = f.add_state()
     f.set_start(start)
@@ -279,7 +280,7 @@ def _pynini_linear_fst(labels: list[int], fst) -> "fst.Fst":
     return f
 
 
-def _pynini_output_labels(fst_obj: "fst.Fst") -> list[int]:
+def _pynini_output_labels(fst_obj: object) -> list[int]:
     start = fst_obj.start()
     if start == -1:
         raise typer.BadParameter("No path found in Pynini output.")

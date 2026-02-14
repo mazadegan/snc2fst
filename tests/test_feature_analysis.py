@@ -7,8 +7,8 @@ import pytest
 SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(SRC_ROOT))
 
-from snc2fst.feature_analysis import compute_p_features, compute_v_features
-from snc2fst.out_dsl import (
+from snc2fst.feature_analysis import compute_p_features, compute_v_features  # noqa: E402
+from snc2fst.out_dsl import (  # noqa: E402
     OutDslError,
     extract_out_features,
     extract_trm_dependent_features,
@@ -16,7 +16,7 @@ from snc2fst.out_dsl import (
     out_uses_all_trm,
     out_uses_full_trm,
 )
-from snc2fst.rules import Rule
+from snc2fst.rules import Rule  # noqa: E402
 
 
 def test_extract_out_features_collects_lit_and_proj() -> None:

@@ -8,7 +8,7 @@ from typer.testing import CliRunner
 SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(SRC_ROOT))
 
-from snc2fst.main import app
+from snc2fst.main import app  # noqa: E402
 
 
 def test_validate_rules_json(tmp_path: Path) -> None:
@@ -22,8 +22,8 @@ def test_validate_rules_json(tmp_path: Path) -> None:
             {
                 "id": "spread_voice_right",
                 "dir": "RIGHT",
-                "inr": [["+","Voice"]],
-                "trm": [["+","Consonantal"]],
+                "inr": [["+", "Voice"]],
+                "trm": [["+", "Consonantal"]],
                 "cnd": [],
                 "out": "(unify (subtract (proj TRM *) (proj TRM (Voice))) (proj INR (Voice)))",
             }
@@ -74,8 +74,8 @@ def test_validate_rules_dump_vp(tmp_path: Path) -> None:
             {
                 "id": "spread_voice_right",
                 "dir": "RIGHT",
-                "inr": [["+","Voice"]],
-                "trm": [["+","Consonantal"]],
+                "inr": [["+", "Voice"]],
+                "trm": [["+", "Consonantal"]],
                 "cnd": [],
                 "out": "(proj TRM (Voice))",
             }
@@ -111,8 +111,8 @@ def test_validate_rules_fst_stats(tmp_path: Path) -> None:
             {
                 "id": "spread_voice_right",
                 "dir": "RIGHT",
-                "inr": [["+","Voice"]],
-                "trm": [["+","Consonantal"]],
+                "inr": [["+", "Voice"]],
+                "trm": [["+", "Consonantal"]],
                 "cnd": [],
                 "out": "(proj TRM (Voice))",
             }
@@ -147,7 +147,7 @@ def test_validate_rules_unknown_out_feature(tmp_path: Path) -> None:
             {
                 "id": "bad_out",
                 "dir": "RIGHT",
-                "inr": [["+","Voice"]],
+                "inr": [["+", "Voice"]],
                 "trm": [],
                 "cnd": [],
                 "out": "(bundle (+ Continuant))",

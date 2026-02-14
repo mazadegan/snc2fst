@@ -2,7 +2,7 @@ import pytest
 
 pytest.importorskip("pywrapfst")
 
-from snc2fst.main import _has_epsilon_arcs
+from snc2fst.main import _has_epsilon_arcs  # noqa: E402
 
 
 def test_has_epsilon_arcs_detects_epsilons() -> None:
