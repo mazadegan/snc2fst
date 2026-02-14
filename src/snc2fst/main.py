@@ -154,6 +154,14 @@ def _load_rules_payload(path: Path) -> dict:
     return payload
 
 
+def _load_rules_file(path: Path) -> RulesFile:
+    payload = _load_rules_payload(path)
+    try:
+        return RulesFile.model_validate(payload)
+    except ValidationError as exc:
+        raise typer.BadParameter(format_validation_error(exc)) from exc
+
+
 def _load_input_payload(path: Path) -> list[object]:
     suffix = path.suffix.lower()
     if suffix == ".json":
@@ -222,11 +230,29 @@ def _validate_rule_features(
             )
 
 
+def _validate_rules_against_alphabet(
+    rules_file: RulesFile, alphabet_features: set[str]
+) -> None:
+    for rule in rules_file.rules:
+        _validate_rule_features(rule, alphabet_features, "inr")
+        _validate_rule_features(rule, alphabet_features, "trm")
+        _validate_rule_features(rule, alphabet_features, "cnd")
+        try:
+            evaluate_out_dsl(
+                rule.out,
+                inr=_bundle_from_rule(rule, "inr"),
+                trm=_bundle_from_rule(rule, "trm"),
+                features=alphabet_features,
+            )
+        except OutDslError as exc:
+            raise typer.BadParameter(
+                f"Rule {rule.id} out is invalid: {exc}"
+            ) from exc
+
+
 def _validate_rules_file(
     rules_path: Path, alphabet_path: Path | None
 ) -> RulesFile:
-    payload = _load_rules_payload(rules_path)
-
     if alphabet_path is None:
         raise typer.BadParameter(
             "Rules validation requires an alphabet CSV/TSV file. "
@@ -234,26 +260,8 @@ def _validate_rules_file(
         )
 
     features = _load_alphabet_features(alphabet_path)
-
-    try:
-        rules_file = RulesFile.model_validate(payload)
-    except ValidationError as exc:
-        raise typer.BadParameter(format_validation_error(exc)) from exc
-    for rule in rules_file.rules:
-        _validate_rule_features(rule, features, "inr")
-        _validate_rule_features(rule, features, "trm")
-        _validate_rule_features(rule, features, "cnd")
-        try:
-            evaluate_out_dsl(
-                rule.out,
-                inr=_bundle_from_rule(rule, "inr"),
-                trm=_bundle_from_rule(rule, "trm"),
-                features=features,
-            )
-        except OutDslError as exc:
-            raise typer.BadParameter(
-                f"Rule {rule.id} out is invalid: {exc}"
-            ) from exc
+    rules_file = _load_rules_file(rules_path)
+    _validate_rules_against_alphabet(rules_file, features)
     return rules_file
 
 
@@ -502,31 +510,13 @@ def compile_rule(
     This command requires Pynini/pywrapfst.
     """
     rules_path = rules
-    payload = _load_rules_payload(rules_path)
-    try:
-        rules_file = RulesFile.model_validate(payload)
-    except ValidationError as exc:
-        raise typer.BadParameter(format_validation_error(exc)) from exc
+    rules_file = _load_rules_file(rules_path)
     rules_list = rules_file.rules
 
     from .feature_analysis import compute_p_features, compute_v_features
 
     features = _load_alphabet_features(alphabet)
-    for rule in rules_list:
-        _validate_rule_features(rule, features, "inr")
-        _validate_rule_features(rule, features, "trm")
-        _validate_rule_features(rule, features, "cnd")
-        try:
-            evaluate_out_dsl(
-                rule.out,
-                inr=_bundle_from_rule(rule, "inr"),
-                trm=_bundle_from_rule(rule, "trm"),
-                features=features,
-            )
-        except OutDslError as exc:
-            raise typer.BadParameter(
-                f"Rule {rule.id} out is invalid: {exc}"
-            ) from exc
+    _validate_rules_against_alphabet(rules_file, features)
 
     if rule_id is not None:
         selected_rules = [_select_rule(rules_list, rule_id)]
@@ -691,31 +681,13 @@ def eval_rule(
     reversing input/output around the machine.
     """
     rules_path = rules
-    payload = _load_rules_payload(rules_path)
-    try:
-        rules_file = RulesFile.model_validate(payload)
-    except ValidationError as exc:
-        raise typer.BadParameter(format_validation_error(exc)) from exc
+    rules_file = _load_rules_file(rules_path)
     rules_list = rules_file.rules
 
     alphabet_data = _load_alphabet(alphabet)
     feature_order = tuple(alphabet_data.feature_schema.features)
     features = set(feature_order)
-    for rule in rules_list:
-        _validate_rule_features(rule, features, "inr")
-        _validate_rule_features(rule, features, "trm")
-        _validate_rule_features(rule, features, "cnd")
-        try:
-            evaluate_out_dsl(
-                rule.out,
-                inr=_bundle_from_rule(rule, "inr"),
-                trm=_bundle_from_rule(rule, "trm"),
-                features=features,
-            )
-        except OutDslError as exc:
-            raise typer.BadParameter(
-                f"Rule {rule.id} out is invalid: {exc}"
-            ) from exc
+    _validate_rules_against_alphabet(rules_file, features)
 
     from .feature_analysis import compute_p_features, compute_v_features
 
