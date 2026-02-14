@@ -971,24 +971,6 @@ def _format_word_list(words: list[list[object]]) -> str:
     lines.append("]")
     return "\n".join(lines) + "\n"
 
-
-def _format_word_pairs(
-    pairs: list[dict[str, list[object]]],
-) -> str:
-    lines = ["["]
-    for idx, item in enumerate(pairs):
-        input_word = item.get("input", [])
-        output_word = item.get("output", [])
-        input_rendered = _format_word_inline(input_word)
-        output_rendered = _format_word_inline(output_word)
-        suffix = "," if idx < len(pairs) - 1 else ""
-        lines.append(
-            f'  {{"input": {input_rendered}, "output": {output_rendered}}}{suffix}'
-        )
-    lines.append("]")
-    return "\n".join(lines) + "\n"
-
-
 def _format_word_inline(word: list[object]) -> str:
     rendered_items: list[str] = []
     for item in word:

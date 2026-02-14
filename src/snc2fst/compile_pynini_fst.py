@@ -121,23 +121,6 @@ def compile_pynini_fst(
     )
 
 
-def write_pynini_fst(
-    rule: Rule,
-    fst_path: Path,
-    *,
-    show_progress: bool = False,
-    v_features: set[str] | None = None,
-    p_features: set[str] | None = None,
-) -> None:
-    machine = compile_pynini_fst(
-        rule,
-        show_progress=show_progress,
-        v_features=v_features,
-        p_features=p_features,
-    )
-    machine.fst.write(str(fst_path))
-
-
 def to_optimal(machine: PyniniMachine) -> PyniniMachine:
     try:
         import pynini
@@ -279,31 +262,6 @@ def evaluate_with_pynini(
         output_words.append(output_syms)
     return output_words
 
-
-def _pynini_fst_from_machine(machine, fst) -> "fst.Fst":
-    max_state = machine.start_state
-    for src, _, _, dst in machine.arcs:
-        if src > max_state:
-            max_state = src
-        if dst > max_state:
-            max_state = dst
-    if machine.final_states:
-        max_state = max(max_state, max(machine.final_states))
-
-    fst_machine = fst.VectorFst()
-    for _ in range(max_state + 1):
-        fst_machine.add_state()
-    fst_machine.set_start(machine.start_state)
-    weight = fst.Weight.one(fst_machine.weight_type())
-    for state in machine.final_states:
-        fst_machine.set_final(state, weight)
-    for src, ilabel, olabel, dst in machine.arcs:
-        fst_machine.add_arc(
-            src, fst.Arc(ilabel, olabel, weight, dst)
-        )
-    return fst_machine
-
-
 def _pynini_linear_fst(labels: list[int], fst) -> "fst.Fst":
     f = fst.VectorFst()
     start = f.add_state()
@@ -357,28 +315,6 @@ def _decode_tv_label(label: int, size: int) -> tuple[int, ...]:
         digits.append(value % 3)
         value //= 3
     return tuple(digits)
-
-
-def _labels_to_alphabet(
-    labels: list[int],
-    v_order: tuple[str, ...],
-    feature_order: tuple[str, ...],
-    bundle_to_symbol: dict[tuple[str, ...], str],
-    strict: bool,
-) -> list[object]:
-    output: list[object] = []
-    for label in labels:
-        bundle = _tv_tuple_to_bundle(_decode_tv_label(label, len(v_order)), v_order)
-        bundle_key = tuple(bundle.get(feature, "0") for feature in feature_order)
-        if bundle_key not in bundle_to_symbol:
-            if strict:
-                raise typer.BadParameter(
-                    f"Output bundle has no symbol: {bundle_key}"
-                )
-            output.append(bundle)
-        else:
-            output.append(bundle_to_symbol[bundle_key])
-    return output
 
 
 def _bundle_to_tv_tuple(
