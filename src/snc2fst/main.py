@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import re
 import tomllib
 from pathlib import Path
 
@@ -655,7 +656,7 @@ def eval_rule(
     output_format: str = typer.Option(
         "json",
         "--format",
-        help="Output format (json, txt, csv, tsv).",
+        help="Output format (json, txt, csv, tsv, tex).",
         show_choices=True,
         case_sensitive=False,
     ),
@@ -776,7 +777,7 @@ def eval_rule(
         "rows": table_rows,
     }
     output_format = output_format.lower()
-    valid_formats = {"json", "txt", "csv", "tsv"}
+    valid_formats = {"json", "txt", "csv", "tsv", "tex"}
     if output_format not in valid_formats:
         raise typer.BadParameter(
             "--format must be one of: " + ", ".join(sorted(valid_formats))
@@ -817,6 +818,38 @@ def eval_rule(
 
         if output_format == "txt":
             rendered = _render_ascii_table(headers, rows)
+            output.write_text(rendered, encoding="utf-8")
+        elif output_format == "tex":
+            tex_headers = ["UR"] + [
+                _format_word_tex(word, "ur") for word in segments
+            ]
+            tex_rows: list[list[str]] = []
+            for row_idx, row in enumerate(table_rows):
+                outputs = row.get("outputs")
+                if outputs is None:
+                    outputs = row.get("output", [])
+                prev_outputs: list[list[object]]
+                if row_idx == 0:
+                    prev_outputs = segments
+                else:
+                    prev_row = table_rows[row_idx - 1]
+                    prev_outputs = prev_row.get("outputs")
+                    if prev_outputs is None:
+                        prev_outputs = prev_row.get("output", [])
+                rendered_outputs = []
+                for idx, word in enumerate(outputs):
+                    if idx < len(prev_outputs) and word == prev_outputs[idx]:
+                        rendered_outputs.append("---")
+                    else:
+                        rendered_outputs.append(_format_word_tex(word, "sr"))
+                tex_rows.append(
+                    [_format_tex_rule_label(str(row.get("rule_id", "")))]
+                    + rendered_outputs
+                )
+            tex_rows.append(
+                ["SR"] + [_format_word_tex(word, "sr") for word in last_outputs]
+            )
+            rendered = _render_tex_table(tex_headers, tex_rows)
             output.write_text(rendered, encoding="utf-8")
         else:
             delimiter = "," if output_format == "csv" else "\t"
@@ -959,6 +992,53 @@ def _render_ascii_table(headers: list[str], rows: list[list[str]]) -> str:
     for row in rows:
         lines.append(render_row(row))
         lines.append(separator)
+    return "\n".join(lines) + "\n"
+
+
+def _escape_tex(text: str) -> str:
+    replacements = {
+        "\\": r"\textbackslash{}",
+        "&": r"\&",
+        "%": r"\%",
+        "$": r"\$",
+        "#": r"\#",
+        "_": r"\_",
+        "{": r"\{",
+        "}": r"\}",
+        "~": r"\textasciitilde{}",
+        "^": r"\textasciicircum{}",
+    }
+    return "".join(replacements.get(ch, ch) for ch in text)
+
+
+def _format_word_tex(word: list[object], label: str) -> str:
+    compact = _escape_tex(_format_word_compact(word))
+    if label == "ur":
+        return f"/{compact}/"
+    return f"[{compact}]"
+
+
+def _format_tex_rule_label(rule_id: str) -> str:
+    if re.fullmatch(r"R_[0-9]+", rule_id):
+        return f"${rule_id}$"
+    return _escape_tex(rule_id)
+
+
+def _render_tex_table(headers: list[str], rows: list[list[str]]) -> str:
+    colspec = "r" + ("c" * (len(headers) - 1))
+
+    def render_row(cells: list[str], *, escape: bool) -> str:
+        rendered_cells = [
+            _escape_tex(cell) if escape else cell for cell in cells
+        ]
+        return "  " + " & ".join(rendered_cells) + r" \\"
+
+    lines = [f"\\begin{{tabular}}{{{colspec}}}"]
+    lines.append(render_row(headers, escape=False))
+    lines.append(r"  \hline")
+    for row in rows:
+        lines.append(render_row(row, escape=False))
+    lines.append(r"\end{tabular}")
     return "\n".join(lines) + "\n"
 
 

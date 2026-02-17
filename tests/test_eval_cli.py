@@ -217,3 +217,56 @@ def test_eval_cli_dump_vp(tmp_path: Path) -> None:
     assert result.exit_code == 0, result.output
     assert "V:" in result.output
     assert "P:" in result.output
+
+
+def test_eval_cli_outputs_tex(tmp_path: Path) -> None:
+    rules = {
+        "id": "rules",
+        "rules": [
+            {
+                "id": "R_1",
+                "dir": "RIGHT",
+                "inr": [["+", "Voice"]],
+                "trm": [["+", "Consonantal"]],
+                "cnd": [],
+                "out": "(bundle (- Voice))",
+            }
+        ],
+    }
+    rules_path = tmp_path / "rules.json"
+    rules_path.write_text(json.dumps(rules), encoding="utf-8")
+
+    alphabet_path = tmp_path / "alphabet.csv"
+    alphabet_path.write_text(
+        ",a,b,c,d\nVoice,+,-,0,-\nConsonantal,0,+,-,0\n",
+        encoding="utf-8",
+    )
+
+    input_segments = [["a", "b"], ["b", "c"]]
+    input_path = tmp_path / "input.json"
+    input_path.write_text(json.dumps(input_segments), encoding="utf-8")
+
+    output_path = tmp_path / "output.tex"
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "eval",
+            str(rules_path),
+            str(alphabet_path),
+            str(input_path),
+            "--format",
+            "tex",
+            "--output",
+            str(output_path),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert output_path.read_text(encoding="utf-8") == (
+        "\\begin{tabular}{rcc}\n"
+        "  UR & /ab/ & /bc/ \\\\\n"
+        "  \\hline\n"
+        "  $R_1$ & [db] & --- \\\\\n"
+        "  SR & [db] & [bc] \\\\\n"
+        "\\end{tabular}\n"
+    )

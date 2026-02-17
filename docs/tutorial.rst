@@ -128,10 +128,11 @@ Select an output format (default: ``json``):
    snc2fst eval samples/rules.toml samples/alphabet.csv samples/input.toml --format txt
    snc2fst eval samples/rules.toml samples/alphabet.csv samples/input.toml --format csv
    snc2fst eval samples/rules.toml samples/alphabet.csv samples/input.toml --format tsv
+   snc2fst eval samples/rules.toml samples/alphabet.csv samples/input.toml --format tex
 
 If ``--output`` is omitted, the default is ``<rules_id>.out.<format>`` next to the rules file.
 
-For ``txt``, ``csv``, and ``tsv`` outputs, the table uses:
+For ``txt``, ``csv``, ``tsv``, and ``tex`` outputs, the table uses:
 
 * ``UR`` as the first column header (the original input words).
 * ``---`` when a rule does not change a word relative to the previous rule.

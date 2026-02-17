@@ -346,6 +346,7 @@ Select an output format (default: `json`):
 snc2fst eval samples/rules.toml samples/alphabet.csv samples/input.toml --format txt
 snc2fst eval samples/rules.toml samples/alphabet.csv samples/input.toml --format csv
 snc2fst eval samples/rules.toml samples/alphabet.csv samples/input.toml --format tsv
+snc2fst eval samples/rules.toml samples/alphabet.csv samples/input.toml --format tex
 ```
 
 ### Inspect V and P
