@@ -28,8 +28,24 @@ app = typer.Typer(
 )
 
 
+def _version_callback(value: bool) -> None:
+    if not value:
+        return
+    typer.echo(f"v{__version__}")
+    raise typer.Exit()
+
+
 @app.callback()
-def cli() -> None:
+def cli(
+    version: bool = typer.Option(
+        False,
+        "--version",
+        "-V",
+        is_eager=True,
+        callback=_version_callback,
+        help="Show the snc2fst version and exit.",
+    ),
+) -> None:
     """snc2fst command line interface."""
     pass
 
@@ -56,12 +72,6 @@ def _normalize_value(value: str) -> str:
     raise ValueError(
         f"Invalid feature value: {value!r} (expected '+', '-', '0', or blank)"
     )
-
-
-@app.command()
-def version() -> None:
-    """Print the snc2fst version."""
-    typer.echo(f"v{__version__}")
 
 
 def _table_to_json(
