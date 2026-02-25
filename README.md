@@ -110,11 +110,13 @@ conda install mazadegan::snc2fst
 ### Generate sample files
 
 ```
-snc2fst init samples/
+snc2fst init .
 ```
 
 This creates `alphabet.csv`, `rules.toml`, `input.toml`, and `snc2fst.toml`
-inside `samples/`.
+in the current working directory.
+
+All CLI examples below assume you are running commands from that same directory.
 
 ### Project config (`snc2fst.toml`)
 
@@ -195,19 +197,19 @@ Notes:
 Rules validation requires an alphabet:
 
 ```
-snc2fst validate rules samples/rules.toml samples/alphabet.csv
+snc2fst validate rules rules.toml alphabet.csv
 ```
 
 Validate an alphabet file:
 
 ```
-snc2fst validate alphabet samples/alphabet.csv
+snc2fst validate alphabet alphabet.csv
 ```
 
 Validate input words:
 
 ```
-snc2fst validate input samples/input.toml samples/alphabet.csv
+snc2fst validate input input.toml alphabet.csv
 ```
 
 ### Compile rules to AT&T + symtab
@@ -215,7 +217,7 @@ snc2fst validate input samples/input.toml samples/alphabet.csv
 > Uses `pynini`/`pywrapfst`.
 
 ```
-snc2fst compile samples/
+snc2fst compile .
 ```
 
 By default, outputs are written to `TARGET/compiled/`.
@@ -223,31 +225,31 @@ By default, outputs are written to `TARGET/compiled/`.
 Use explicit paths instead of discovery/config:
 
 ```
-snc2fst compile samples/ -r samples/rules.toml -a samples/alphabet.csv
+snc2fst compile . -r rules.toml -a alphabet.csv
 ```
 
 Write outputs to a specific directory:
 
 ```
-snc2fst compile samples/ -o /tmp/compiled
+snc2fst compile . -o compiled_out
 ```
 
 Compile and also emit a binary FST (requires `pynini`):
 
 ```
-snc2fst compile samples/ --fst
+snc2fst compile . --fst
 ```
 
 Normalize the compiled FST before writing output:
 
 ```
-snc2fst compile samples/ --normalize
+snc2fst compile . --normalize
 ```
 
 Fail if the normalized FST contains epsilon transitions:
 
 ```
-snc2fst compile samples/ --no-epsilon
+snc2fst compile . --no-epsilon
 ```
 
 When the rules file contains multiple rules, omit `--rule-id` to compile all
@@ -257,14 +259,14 @@ of them. Each rule is written as `{rule_id}.att`, `{rule_id}.sym`, and (if `--fs
 Show progress bar when generating large FSTs:
 
 ```
-snc2fst compile samples/ --progress
-snc2fst compile samples/ -p
+snc2fst compile . --progress
+snc2fst compile . -p
 ```
 
 Guard against accidental blow‑ups (default --max-arcs is 5 million):
 
 ```
-snc2fst compile samples/ --max-arcs 1000000
+snc2fst compile . --max-arcs 1000000
 ```
 
 ### Evaluate input words
@@ -351,7 +353,7 @@ Example with `--include-input`:
 ```
 
 ```
-snc2fst eval samples/ --output samples/out.json
+snc2fst eval . --output out.json
 ```
 
 If `--output` is omitted, the default is `<rules_id>.out.<format>` next to the rules file.
@@ -359,34 +361,34 @@ If `--output` is omitted, the default is `<rules_id>.out.<format>` next to the r
 Use explicit paths instead of discovery/config:
 
 ```
-snc2fst eval samples/ -r samples/rules.toml -a samples/alphabet.csv -i samples/input.toml
+snc2fst eval . -r rules.toml -a alphabet.csv -i input.toml
 ```
 
 Include input + output in the result:
 
 ```
-snc2fst eval samples/ --output samples/out.json --include-input
+snc2fst eval . --output out.json --include-input
 ```
 
 Strict symbol mapping (error if output bundle has no matching symbol in alphabet):
 
 ```
-snc2fst eval samples/ --output samples/out.json --strict
+snc2fst eval . --output out.json --strict
 ```
 
 Use the Pynini backend and compare to the reference evaluator (`--compare` implies `--pynini`):
 
 ```
-snc2fst eval samples/ --output samples/out.json --pynini --compare
+snc2fst eval . --output out.json --pynini --compare
 ```
 
 Select an output format (default: `json`):
 
 ```
-snc2fst eval samples/ --format txt
-snc2fst eval samples/ --format csv
-snc2fst eval samples/ --format tsv
-snc2fst eval samples/ --format tex
+snc2fst eval . --format txt
+snc2fst eval . --format csv
+snc2fst eval . --format tsv
+snc2fst eval . --format tex
 ```
 
 ### Inspect V and P
@@ -394,8 +396,8 @@ snc2fst eval samples/ --format tex
 Print the feature sets used to build the machine:
 
 ```
-snc2fst eval samples/ --output samples/out.json --dump-vp
-snc2fst validate rules samples/rules.toml samples/alphabet.csv --dump-vp
+snc2fst eval . --output out.json --dump-vp
+snc2fst validate rules rules.toml alphabet.csv --dump-vp
 ```
 
 ## License
