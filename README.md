@@ -113,6 +113,35 @@ conda install mazadegan::snc2fst
 snc2fst init samples/
 ```
 
+This creates `alphabet.csv`, `rules.toml`, `input.toml`, and `snc2fst.toml`
+inside `samples/`.
+
+### Project config (`snc2fst.toml`)
+
+`compile` and `eval` run against a project directory (`TARGET`) and resolve
+files from `snc2fst.toml` when present:
+
+```toml
+[paths]
+alphabet = 'alphabet.csv'
+rules = 'rules.toml'
+input = 'input.toml'
+
+[tokenizer]
+separator = ';'
+
+[dsl]
+rules_allowed_ops = ['bundle', 'proj', 'unify', 'subtract', 'intersect', 'sym']
+segments_allowed_ops = ['bundle', 'proj', 'unify', 'subtract', 'intersect', 'sym']
+
+[segments]
+E = '(intersect (sym "ə") (sym "e"))'
+```
+
+If `snc2fst.toml` is missing (or a path key is missing), the CLI discovers
+candidate files in the target directory and asks you to disambiguate when
+multiple valid candidates are found (interactive shell).
+
 ## Example rules.toml
 
 ```toml
@@ -130,7 +159,7 @@ out = "(proj TRM (F1))"
 ### Out DSL
 
 The `out` field is a tiny DSL that composes feature bundles from `INR` and `TRM`
-using `bundle`, `proj`, `unify`, and `subtract`. It exists so rules can describe
+using `bundle`, `proj`, `unify`, `subtract`, `intersect`, and `sym`. It exists so rules can describe
 the Out function declaratively without having to evaluate user-generated Python 
 or having a huge JSON schema that’s horrifying to look at.
 
@@ -140,6 +169,7 @@ Examples:
 (proj TRM (Voice))
 (unify (subtract (proj TRM *) (proj TRM (Voice))) (proj INR (Voice)))
 (bundle (- Voice))
+(intersect (sym "u") (sym "y"))
 ```
 
 Signatures:
@@ -149,6 +179,8 @@ Signatures:
 (proj <INR|TRM|expr> (<Feature> ...|*))
 (unify <expr> <expr>)
 (subtract <expr> <expr>)
+(intersect <expr> <expr>)
+(sym <symbol>)
 ```
 
 Notes:
@@ -178,56 +210,68 @@ Validate input words:
 snc2fst validate input samples/input.toml samples/alphabet.csv
 ```
 
-### Compile a rule to AT&T + symtab
+### Compile rules to AT&T + symtab
 
 > Uses `pynini`/`pywrapfst`.
 
 ```
-snc2fst compile samples/rules.toml samples/alphabet.csv samples/rule.att
+snc2fst compile samples/
+```
+
+By default, outputs are written to `TARGET/compiled/`.
+
+Use explicit paths instead of discovery/config:
+
+```
+snc2fst compile samples/ -r samples/rules.toml -a samples/alphabet.csv
+```
+
+Write outputs to a specific directory:
+
+```
+snc2fst compile samples/ -o /tmp/compiled
 ```
 
 Compile and also emit a binary FST (requires `pynini`):
 
 ```
-snc2fst compile samples/rules.toml samples/alphabet.csv samples/rule.att --fst
+snc2fst compile samples/ --fst
 ```
 
 Normalize the compiled FST before writing output:
 
 ```
-snc2fst compile samples/rules.toml samples/alphabet.csv samples/rule.att --normalize
+snc2fst compile samples/ --normalize
 ```
 
 Fail if the normalized FST contains epsilon transitions:
 
 ```
-snc2fst compile samples/rules.toml samples/alphabet.csv samples/rule.att --no-epsilon
+snc2fst compile samples/ --no-epsilon
 ```
 
 When the rules file contains multiple rules, omit `--rule-id` to compile all
-of them. In that case, `output` is treated as a directory and each rule is
-written as `{rule_id}.att`, `{rule_id}.sym`, and (if `--fst` is set)
+of them. Each rule is written as `{rule_id}.att`, `{rule_id}.sym`, and (if `--fst` is set)
 `{rule_id}.fst`.
-
-`compile` requires the alphabet argument.
 
 Show progress bar when generating large FSTs:
 
 ```
-snc2fst compile samples/rules.toml samples/alphabet.csv /tmp/rule.att --progress
-snc2fst compile samples/rules.toml samples/alphabet.csv /tmp/rule.att -p
+snc2fst compile samples/ --progress
+snc2fst compile samples/ -p
 ```
 
 Guard against accidental blow‑ups (default --max-arcs is 5 million):
 
 ```
-snc2fst compile samples/rules.toml samples/alphabet.csv /tmp/rule.att --max-arcs 1000000
+snc2fst compile samples/ --max-arcs 1000000
 ```
 
 ### Evaluate input words
 
-Input format is TOML: a table with an `inputs` array, where each word is a list
-of segment symbols from the alphabet. JSON files are still accepted.
+Input supports TOML or JSON. Each word can be:
+- a list of symbols
+- a string tokenized against alphabet symbols (longest-match, with configurable separator)
 
 Rules files include a top-level `id` plus a `rules` array:
 
@@ -259,17 +303,7 @@ Example `input.toml`:
 inputs = [
   ["0", "A", "B", "C", "D"],
   ["J", "K", "L"],
-  ["T", "U", "V", "W", "X", "Y", "Z"],
-]
-```
-
-Example `output.json` (default):
-
-```json
-[
-  ["D", "A", "B", "C", "D"],
-  ["J", "K", "L"],
-  ["T", "U", "V", "W", "X", "Y", "Z"]
+  "T;U;V;W;X;Y;Z",
 ]
 ```
 
@@ -317,36 +351,42 @@ Example with `--include-input`:
 ```
 
 ```
-snc2fst eval samples/rules.toml samples/alphabet.csv samples/input.toml --output samples/out.json
+snc2fst eval samples/ --output samples/out.json
 ```
 
 If `--output` is omitted, the default is `<rules_id>.out.<format>` next to the rules file.
 
+Use explicit paths instead of discovery/config:
+
+```
+snc2fst eval samples/ -r samples/rules.toml -a samples/alphabet.csv -i samples/input.toml
+```
+
 Include input + output in the result:
 
 ```
-snc2fst eval samples/rules.toml samples/alphabet.csv samples/input.toml --output samples/out.json --include-input
+snc2fst eval samples/ --output samples/out.json --include-input
 ```
 
 Strict symbol mapping (error if output bundle has no matching symbol in alphabet):
 
 ```
-snc2fst eval samples/rules.toml samples/alphabet.csv samples/input.toml --output samples/out.json --strict
+snc2fst eval samples/ --output samples/out.json --strict
 ```
 
 Use the Pynini backend and compare to the reference evaluator (`--compare` implies `--pynini`):
 
 ```
-snc2fst eval samples/rules.toml samples/alphabet.csv samples/input.toml --output samples/out.json --pynini --compare
+snc2fst eval samples/ --output samples/out.json --pynini --compare
 ```
 
 Select an output format (default: `json`):
 
 ```
-snc2fst eval samples/rules.toml samples/alphabet.csv samples/input.toml --format txt
-snc2fst eval samples/rules.toml samples/alphabet.csv samples/input.toml --format csv
-snc2fst eval samples/rules.toml samples/alphabet.csv samples/input.toml --format tsv
-snc2fst eval samples/rules.toml samples/alphabet.csv samples/input.toml --format tex
+snc2fst eval samples/ --format txt
+snc2fst eval samples/ --format csv
+snc2fst eval samples/ --format tsv
+snc2fst eval samples/ --format tex
 ```
 
 ### Inspect V and P
@@ -354,7 +394,7 @@ snc2fst eval samples/rules.toml samples/alphabet.csv samples/input.toml --format
 Print the feature sets used to build the machine:
 
 ```
-snc2fst eval samples/rules.toml samples/alphabet.csv samples/input.toml --output samples/out.json --dump-vp
+snc2fst eval samples/ --output samples/out.json --dump-vp
 snc2fst validate rules samples/rules.toml samples/alphabet.csv --dump-vp
 ```
 
@@ -428,6 +468,7 @@ Use `--compare` to cross‑check outputs.
 
 ## Troubleshooting
 
-- **"Evaluation requires an alphabet"** → provide the `alphabet` argument.
+- **"TARGET must be a directory."** → run `compile`/`eval` with a project directory.
+- **"Missing required overrides"** → if you pass one of `-r/-a/-i`, pass the full set required by that command.
 - **"Unknown symbol"** → input contains symbols not in the alphabet.
 - **"--max-arcs exceeded"** → reduce features or raise `--max-arcs`.
