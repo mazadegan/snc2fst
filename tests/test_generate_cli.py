@@ -21,9 +21,11 @@ def test_init_creates_sample_files(tmp_path: Path) -> None:
     alphabet_path = output_dir / "alphabet.csv"
     rules_path = output_dir / "rules.toml"
     input_path = output_dir / "input.toml"
+    config_path = output_dir / "snc2fst.toml"
     assert alphabet_path.exists()
     assert rules_path.exists()
     assert input_path.exists()
+    assert config_path.exists()
 
     rules = tomllib.loads(rules_path.read_text(encoding="utf-8"))
     assert "id" in rules
@@ -33,6 +35,14 @@ def test_init_creates_sample_files(tmp_path: Path) -> None:
     assert isinstance(input_payload, dict)
     assert isinstance(input_payload.get("inputs"), list)
     assert len(input_payload["inputs"]) >= 3
+    config_payload = tomllib.loads(config_path.read_text(encoding="utf-8"))
+    assert config_payload == {
+        "paths": {
+            "alphabet": "alphabet.csv",
+            "rules": "rules.toml",
+            "input": "input.toml",
+        }
+    }
 
     alphabet_lines = alphabet_path.read_text(encoding="utf-8").splitlines()
     header = alphabet_lines[0].split(",")
@@ -50,3 +60,4 @@ def test_init_defaults_to_cwd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     assert (tmp_path / "alphabet.csv").exists()
     assert (tmp_path / "rules.toml").exists()
     assert (tmp_path / "input.toml").exists()
+    assert (tmp_path / "snc2fst.toml").exists()

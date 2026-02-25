@@ -4,6 +4,7 @@ import csv
 import io
 import json
 import re
+import sys
 import tomllib
 from pathlib import Path
 
@@ -21,7 +22,10 @@ from .compile_pynini_fst import (
     write_att_pynini,
 )
 
-app = typer.Typer(add_completion=False)
+app = typer.Typer(
+    add_completion=False,
+    context_settings={"help_option_names": ["-h", "--help"]},
+)
 
 
 @app.callback()
@@ -65,7 +69,17 @@ def _table_to_json(
     delimiter: str | None,
 ) -> str:
     """Parse a feature table and return JSON for the Alphabet model."""
-    text = table_path.read_text(encoding="utf-8-sig")
+    try:
+        text = table_path.read_text(encoding="utf-8-sig")
+    except FileNotFoundError as exc:
+        raise typer.BadParameter(
+            f"Alphabet file not found: {table_path}"
+        ) from exc
+    except OSError as exc:
+        reason = exc.strerror or str(exc)
+        raise typer.BadParameter(
+            f"Could not read alphabet file {table_path}: {reason}"
+        ) from exc
     if not text.strip():
         raise typer.BadParameter("Input file is empty.")
 
@@ -121,7 +135,16 @@ def _table_to_json(
 
 def _load_json(path: Path) -> object:
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError as exc:
+        raise typer.BadParameter(f"File not found: {path}") from exc
+    except OSError as exc:
+        reason = exc.strerror or str(exc)
+        raise typer.BadParameter(
+            f"Could not read file {_display_path(path)}: {reason}"
+        ) from exc
+    try:
+        return json.loads(text)
     except json.JSONDecodeError as exc:
         raise typer.BadParameter(
             f"Invalid JSON: {exc.msg} (line {exc.lineno}, column {exc.colno})"
@@ -130,11 +153,262 @@ def _load_json(path: Path) -> object:
 
 def _load_toml(path: Path) -> object:
     try:
-        return tomllib.loads(path.read_text(encoding="utf-8"))
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError as exc:
+        raise typer.BadParameter(f"File not found: {path}") from exc
+    except OSError as exc:
+        reason = exc.strerror or str(exc)
+        raise typer.BadParameter(
+            f"Could not read file {_display_path(path)}: {reason}"
+        ) from exc
+    try:
+        return tomllib.loads(text)
     except tomllib.TOMLDecodeError as exc:
         raise typer.BadParameter(
             f"Invalid TOML: {exc.msg} (line {exc.lineno}, column {exc.colno})"
         ) from exc
+
+
+def _resolve_path(base_dir: Path, raw_path: str) -> Path:
+    path = Path(raw_path)
+    if path.is_absolute():
+        return path
+    return (base_dir / path).resolve()
+
+
+def _display_path(path: Path) -> str:
+    try:
+        return str(path.resolve().relative_to(Path.cwd().resolve()))
+    except ValueError:
+        return str(path.resolve())
+
+
+def _is_interactive_session() -> bool:
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
+
+def _prompt_select_path(
+    *,
+    label: str,
+    candidates: list[Path],
+    directory: Path,
+) -> Path:
+    try:
+        import questionary
+    except ImportError as exc:
+        raise typer.BadParameter(
+            "Multiple candidate files were found for "
+            f"{label} in {_display_path(directory)}, but questionary is not installed. "
+            "Install questionary or pass explicit --rules/--alphabet/--input."
+        ) from exc
+
+    choices: list[str] = []
+    selected_to_path: dict[str, Path] = {}
+    for path in candidates:
+        display = _display_path(path)
+        if display in selected_to_path:
+            display = str(path.resolve())
+        choices.append(display)
+        selected_to_path[display] = path
+    selected = questionary.select(
+        f"Select {label} file:",
+        choices=choices,
+    ).ask()
+    if selected is None:
+        raise typer.Abort()
+    return selected_to_path[selected]
+
+
+def _resolve_candidate(
+    *,
+    label: str,
+    candidates: list[Path],
+    directory: Path,
+) -> Path:
+    if not candidates:
+        raise typer.BadParameter(
+            f"Could not find a valid {label} file in {_display_path(directory)}."
+        )
+    if len(candidates) == 1:
+        return candidates[0]
+
+    if _is_interactive_session():
+        return _prompt_select_path(
+            label=label,
+            candidates=candidates,
+            directory=directory,
+        )
+    rendered = ", ".join(str(path.name) for path in candidates)
+    raise typer.BadParameter(
+        f"Found multiple {label} files in {_display_path(directory)}: {rendered}. "
+        "Run in an interactive terminal to choose one, or pass explicit "
+        "--rules/--alphabet/--input."
+    )
+
+
+def _discover_alphabet_candidates(directory: Path) -> list[Path]:
+    candidates: list[Path] = []
+    try:
+        entries = sorted(directory.iterdir())
+    except OSError as exc:
+        reason = exc.strerror or str(exc)
+        raise typer.BadParameter(
+            f"Could not scan directory {_display_path(directory)}: {reason}"
+        ) from exc
+    for path in entries:
+        if not path.is_file():
+            continue
+        try:
+            _load_alphabet(path)
+        except typer.BadParameter:
+            continue
+        candidates.append(path)
+    return candidates
+
+
+def _discover_rules_candidates(directory: Path) -> list[Path]:
+    candidates: list[Path] = []
+    try:
+        entries = sorted(directory.iterdir())
+    except OSError as exc:
+        reason = exc.strerror or str(exc)
+        raise typer.BadParameter(
+            f"Could not scan directory {_display_path(directory)}: {reason}"
+        ) from exc
+    for path in entries:
+        if not path.is_file():
+            continue
+        try:
+            _load_rules_file(path)
+        except typer.BadParameter:
+            continue
+        candidates.append(path)
+    return candidates
+
+
+def _validate_input_segments_shape(payload: list[object]) -> None:
+    for idx, word in enumerate(payload):
+        if not isinstance(word, list):
+            raise typer.BadParameter(
+                f"Word at index {idx} is not an array of symbols."
+            )
+        for sym in word:
+            if not isinstance(sym, str) or not sym.strip():
+                raise typer.BadParameter(
+                    f"Word {idx} contains a non-string symbol."
+                )
+
+
+def _discover_input_candidates(directory: Path) -> list[Path]:
+    candidates: list[Path] = []
+    try:
+        entries = sorted(directory.iterdir())
+    except OSError as exc:
+        reason = exc.strerror or str(exc)
+        raise typer.BadParameter(
+            f"Could not scan directory {_display_path(directory)}: {reason}"
+        ) from exc
+    for path in entries:
+        if not path.is_file():
+            continue
+        try:
+            payload = _load_input_payload(path)
+            _validate_input_segments_shape(payload)
+        except typer.BadParameter:
+            continue
+        candidates.append(path)
+    return candidates
+
+
+def _load_project_paths(directory: Path) -> tuple[dict[str, Path], bool]:
+    config_path = directory / "snc2fst.toml"
+    result: dict[str, Path] = {}
+    if not config_path.exists():
+        return result, False
+
+    payload = _load_toml(config_path)
+    if not isinstance(payload, dict):
+        raise typer.BadParameter(
+            "snc2fst.toml must be a TOML table/object."
+        )
+
+    paths_obj = payload.get("paths", {})
+    if paths_obj is None:
+        paths_obj = {}
+    if not isinstance(paths_obj, dict):
+        raise typer.BadParameter(
+            "snc2fst.toml [paths] must be a TOML table."
+        )
+
+    for key in ("alphabet", "rules", "input"):
+        value = paths_obj.get(key)
+        if value is None:
+            continue
+        if not isinstance(value, str) or not value.strip():
+            raise typer.BadParameter(
+                f"snc2fst.toml paths.{key} must be a non-empty string path."
+            )
+        resolved = _resolve_path(config_path.parent, value.strip())
+        cli_flag = f"--{key}"
+        if not resolved.exists():
+            raise typer.BadParameter(
+                f"Configured snc2fst.toml [paths].{key} not found: {_display_path(resolved)}. "
+                f"Update snc2fst.toml or pass {cli_flag} <path>."
+            )
+        if not resolved.is_file():
+            raise typer.BadParameter(
+                f"Configured snc2fst.toml [paths].{key} is not a file: {_display_path(resolved)}. "
+                f"Update snc2fst.toml or pass {cli_flag} <path>."
+            )
+        result[key] = resolved
+    return result, True
+
+
+def _validate_configured_project_path(key: str, path: Path) -> None:
+    cli_flag = f"--{key}"
+    try:
+        if key == "rules":
+            _load_rules_file(path)
+        elif key == "alphabet":
+            _load_alphabet(path)
+        elif key == "input":
+            payload = _load_input_payload(path)
+            _validate_input_segments_shape(payload)
+        else:
+            raise typer.BadParameter(f"Unsupported config path key: {key}")
+    except typer.BadParameter as exc:
+        raise typer.BadParameter(
+            f"Configured snc2fst.toml [paths].{key} is invalid: {exc}. "
+            f"Update snc2fst.toml or pass {cli_flag} <path>."
+        ) from exc
+
+
+def _write_text_output(path: Path, content: str) -> None:
+    try:
+        path.write_text(content, encoding="utf-8")
+    except OSError as exc:
+        reason = exc.strerror or str(exc)
+        raise typer.BadParameter(
+            f"Could not write output file {_display_path(path)}: {reason}"
+        ) from exc
+
+
+def _require_all_overrides(
+    *,
+    command_name: str,
+    overrides: dict[str, Path | None],
+) -> None:
+    provided = {key for key, value in overrides.items() if value is not None}
+    if not provided:
+        return
+    required = set(overrides)
+    if provided != required:
+        missing = ", ".join(sorted(required - provided))
+        provided_list = ", ".join(sorted(provided))
+        raise typer.BadParameter(
+            f"{command_name}: partial explicit overrides are not allowed. "
+            f"Provided: {provided_list}. Missing: {missing}."
+        )
 
 
 def _load_rules_payload(path: Path) -> dict:
@@ -146,6 +420,11 @@ def _load_rules_payload(path: Path) -> dict:
     else:
         raise typer.BadParameter("Rules file must be a .json or .toml file.")
     if not isinstance(payload, dict):
+        raise typer.BadParameter(
+            "Rules file must be an object/table with a 'rules' array."
+        )
+    rules = payload.get("rules")
+    if not isinstance(rules, list):
         raise typer.BadParameter(
             "Rules file must be an object/table with a 'rules' array."
         )
@@ -420,24 +699,36 @@ def validate_input(
 
 @app.command("compile")
 def compile_rule(
-    rules: Path = typer.Argument(
+    target: Path = typer.Argument(
         ...,
         exists=True,
+        dir_okay=True,
+        readable=True,
+        help="Project directory.",
+    ),
+    rules_path_opt: Path | None = typer.Option(
+        None,
+        "--rules",
+        "-r",
         dir_okay=False,
         readable=True,
-        help="Rules JSON/TOML file to compile.",
+        help="Explicit rules JSON/TOML path (directory mode).",
     ),
-    alphabet: Path = typer.Argument(
-        ...,
+    alphabet_opt: Path | None = typer.Option(
+        None,
+        "--alphabet",
+        "-a",
         dir_okay=False,
         readable=True,
-        help="Alphabet CSV/TSV file for rule validation.",
+        help="Explicit alphabet CSV/TSV path (directory mode).",
     ),
-    output: Path = typer.Argument(
-        ...,
+    output_opt: Path | None = typer.Option(
+        None,
+        "--output",
+        "-o",
         dir_okay=True,
         writable=True,
-        help="AT&T output path (file for single rule, directory for multiple).",
+        help="Output directory for compiled files.",
     ),
     rule_id: str | None = typer.Option(
         None,
@@ -489,19 +780,65 @@ def compile_rule(
         help="Fail if the normalized FST contains any epsilon transitions.",
     ),
 ) -> None:
-    """Compile a single rule into AT&T text format (always writes .att and .sym).
+    """Compile rules into AT&T text format (always writes .att and .sym).
 
     The compiled machine is canonical LEFT; RIGHT direction is handled by
     reversing input/output at evaluation time.
     This command requires Pynini/pywrapfst.
     """
-    rules_path = rules
+    if not target.is_dir():
+        raise typer.BadParameter("TARGET must be a directory.")
+    _require_all_overrides(
+        command_name="compile",
+        overrides={"rules": rules_path_opt, "alphabet": alphabet_opt},
+    )
+    if rules_path_opt is not None and alphabet_opt is not None:
+        rules_path = rules_path_opt
+        alphabet_path = alphabet_opt
+        typer.echo("Using explicit paths:")
+        typer.echo(f"  rules: {_display_path(rules_path)}")
+        typer.echo(f"  alphabet: {_display_path(alphabet_path)}")
+    else:
+        directory = target.resolve()
+        config_paths, has_config = _load_project_paths(directory)
+        if has_config:
+            typer.echo(
+                f"Using config: {_display_path(directory / 'snc2fst.toml')}"
+            )
+        else:
+            typer.echo("No snc2fst.toml found; discovering files in directory.")
+        if "rules" in config_paths:
+            _validate_configured_project_path("rules", config_paths["rules"])
+        if "alphabet" in config_paths:
+            _validate_configured_project_path(
+                "alphabet", config_paths["alphabet"]
+            )
+        rules_path = config_paths.get("rules") or _resolve_candidate(
+            label="rules",
+            candidates=_discover_rules_candidates(directory),
+            directory=directory,
+        )
+        alphabet_path = config_paths.get("alphabet") or _resolve_candidate(
+            label="alphabet",
+            candidates=_discover_alphabet_candidates(directory),
+            directory=directory,
+        )
+        if has_config:
+            typer.echo("Resolved paths:")
+            typer.echo(f"  rules: {_display_path(rules_path)}")
+            typer.echo(f"  alphabet: {_display_path(alphabet_path)}")
+
+    if output_opt is not None:
+        output_dir = output_opt
+    else:
+        output_dir = target.resolve() / "compiled"
+
     rules_file = _load_rules_file(rules_path)
     rules_list = rules_file.rules
 
     from .feature_analysis import compute_p_features, compute_v_features
 
-    features = _load_alphabet_features(alphabet)
+    features = _load_alphabet_features(alphabet_path)
     _validate_rules_against_alphabet(rules_file, features)
 
     if rule_id is not None:
@@ -509,23 +846,19 @@ def compile_rule(
     else:
         selected_rules = list(rules_list)
 
-    if len(selected_rules) > 1:
-        if output.suffix:
-            raise typer.BadParameter(
-                "When compiling multiple rules, output must be a directory."
-            )
-        output_dir = output
+    if output_dir.exists() and output_dir.is_file():
+        raise typer.BadParameter("Output path must be a directory.")
+    try:
         output_dir.mkdir(parents=True, exist_ok=True)
-        if symtab is not None:
-            raise typer.BadParameter(
-                "--symtab is only valid when compiling a single rule."
-            )
-    else:
-        output_dir = None
-        if output.exists() and output.is_dir():
-            raise typer.BadParameter(
-                "When compiling a single rule, output must be a file path."
-            )
+    except OSError as exc:
+        reason = exc.strerror or str(exc)
+        raise typer.BadParameter(
+            f"Could not create output directory {_display_path(output_dir)}: {reason}"
+        ) from exc
+    if len(selected_rules) > 1 and symtab is not None:
+        raise typer.BadParameter(
+            "--symtab is only valid when compiling a single rule."
+        )
 
     total_rules = len(selected_rules)
     for idx, rule in enumerate(selected_rules, start=1):
@@ -562,58 +895,77 @@ def compile_rule(
         if progress:
             typer.echo("writing output...")
 
-        if output_dir is None:
-            att_path = output
-        else:
-            att_path = output_dir / f"{rule.id}.att"
+        att_path = output_dir / f"{rule.id}.att"
         if normalize:
             att_path = att_path.with_suffix(".norm.att")
-        if symtab is not None and output_dir is None:
+        if symtab is not None and len(selected_rules) == 1:
             symtab_path = symtab
         else:
             symtab_path = att_path.with_suffix(".sym")
-        write_att_pynini(machine, att_path, symtab_path=symtab_path)
+        try:
+            write_att_pynini(machine, att_path, symtab_path=symtab_path)
+        except OSError as exc:
+            reason = exc.strerror or str(exc)
+            raise typer.BadParameter(
+                f"Could not write compiled output for rule {rule.id}: {reason}"
+            ) from exc
         if fst:
-            if output_dir is None:
-                fst_out = att_path.with_suffix(".fst")
+            fst_out = att_path.with_suffix(".fst")
+            try:
                 machine.fst.write(str(fst_out))
-            else:
-                fst_out = output_dir / f"{rule.id}.fst"
-                machine.fst.write(str(fst_out))
+            except OSError as exc:
+                reason = exc.strerror or str(exc)
+                raise typer.BadParameter(
+                    f"Could not write FST output for rule {rule.id}: {reason}"
+                ) from exc
         state_count, arc_count = _count_fst_states_arcs(machine.fst)
         parts = [
             prefix,
             f"states={state_count} arcs={arc_count}",
-            f"att={att_path} sym={symtab_path}",
+            f"att={_display_path(att_path)} sym={_display_path(symtab_path)}",
         ]
         if fst:
-            parts.append(f"fst={fst_out}")
+            parts.append(f"fst={_display_path(fst_out)}")
         if no_eps_label:
             parts.append(no_eps_label)
         typer.echo(" | ".join(parts))
+    typer.echo(
+        f"Compiled {total_rules} rule(s) to {_display_path(output_dir)}."
+    )
 
 
 @app.command("eval")
 def eval_rule(
-    rules: Path = typer.Argument(
+    target: Path = typer.Argument(
         ...,
         exists=True,
-        dir_okay=False,
+        dir_okay=True,
         readable=True,
-        help="Rules JSON/TOML file to evaluate.",
+        help="Project directory.",
     ),
-    alphabet: Path = typer.Argument(
-        ...,
+    rules_path_opt: Path | None = typer.Option(
+        None,
+        "--rules",
+        "-r",
         dir_okay=False,
         readable=True,
-        help="Alphabet CSV/TSV file used to map symbols to bundles.",
+        help="Explicit rules JSON/TOML path (directory mode).",
     ),
-    input_words: Path = typer.Argument(
-        ...,
-        exists=True,
+    alphabet_opt: Path | None = typer.Option(
+        None,
+        "--alphabet",
+        "-a",
         dir_okay=False,
         readable=True,
-        help="Input JSON/TOML words file (each word is an array of symbols).",
+        help="Explicit alphabet CSV/TSV path (directory mode).",
+    ),
+    input_opt: Path | None = typer.Option(
+        None,
+        "--input",
+        "-i",
+        dir_okay=False,
+        readable=True,
+        help="Explicit input JSON/TOML path (directory mode).",
     ),
     output: Path | None = typer.Option(
         None,
@@ -666,11 +1018,70 @@ def eval_rule(
     The compiled machine is canonical LEFT; RIGHT rules are evaluated by
     reversing input/output around the machine.
     """
-    rules_path = rules
+    if not target.is_dir():
+        raise typer.BadParameter("TARGET must be a directory.")
+    _require_all_overrides(
+        command_name="eval",
+        overrides={
+            "rules": rules_path_opt,
+            "alphabet": alphabet_opt,
+            "input": input_opt,
+        },
+    )
+    if (
+        rules_path_opt is not None
+        and alphabet_opt is not None
+        and input_opt is not None
+    ):
+        rules_path = rules_path_opt
+        alphabet_path = alphabet_opt
+        input_words_path = input_opt
+        typer.echo("Using explicit paths:")
+        typer.echo(f"  rules: {_display_path(rules_path)}")
+        typer.echo(f"  alphabet: {_display_path(alphabet_path)}")
+        typer.echo(f"  input: {_display_path(input_words_path)}")
+    else:
+        directory = target.resolve()
+        config_paths, has_config = _load_project_paths(directory)
+        if has_config:
+            typer.echo(
+                f"Using config: {_display_path(directory / 'snc2fst.toml')}"
+            )
+        else:
+            typer.echo("No snc2fst.toml found; discovering files in directory.")
+        if "rules" in config_paths:
+            _validate_configured_project_path("rules", config_paths["rules"])
+        if "alphabet" in config_paths:
+            _validate_configured_project_path(
+                "alphabet", config_paths["alphabet"]
+            )
+        if "input" in config_paths:
+            _validate_configured_project_path("input", config_paths["input"])
+        rules_path = config_paths.get("rules") or _resolve_candidate(
+            label="rules",
+            candidates=_discover_rules_candidates(directory),
+            directory=directory,
+        )
+        alphabet_path = config_paths.get("alphabet") or _resolve_candidate(
+            label="alphabet",
+            candidates=_discover_alphabet_candidates(directory),
+            directory=directory,
+        )
+        input_words_path = config_paths.get("input") or _resolve_candidate(
+            label="input",
+            candidates=_discover_input_candidates(directory),
+            directory=directory,
+        )
+        if has_config:
+            typer.echo("Resolved paths:")
+            typer.echo(f"  rules: {_display_path(rules_path)}")
+            typer.echo(f"  alphabet: {_display_path(alphabet_path)}")
+            typer.echo(f"  input: {_display_path(input_words_path)}")
+
     rules_file = _load_rules_file(rules_path)
     rules_list = rules_file.rules
 
-    alphabet_data = _load_alphabet(alphabet)
+    alphabet_data = _load_alphabet(alphabet_path)
     feature_order = tuple(alphabet_data.feature_schema.features)
     features = set(feature_order)
     _validate_rules_against_alphabet(rules_file, features)
@@ -681,7 +1092,7 @@ def eval_rule(
         selected_rules = [_select_rule(rules_list, rule_id)]
     else:
         selected_rules = list(rules_list)
-    segments = _load_input_payload(input_words)
+    segments = _load_input_payload(input_words_path)
 
     symbol_to_bundle: dict[str, dict[str, str]] = {}
     bundle_to_symbol: dict[tuple[str, ...], str] = {}
@@ -788,7 +1199,7 @@ def eval_rule(
 
     if output_format == "json":
         rendered = json.dumps(table, ensure_ascii=False, indent=2) + "\n"
-        output.write_text(rendered, encoding="utf-8")
+        _write_text_output(output, rendered)
     else:
         headers = ["UR"] + [_format_word_compact(word) for word in segments]
         rows: list[list[str]] = []
@@ -818,7 +1229,7 @@ def eval_rule(
 
         if output_format == "txt":
             rendered = _render_ascii_table(headers, rows)
-            output.write_text(rendered, encoding="utf-8")
+            _write_text_output(output, rendered)
         elif output_format == "tex":
             tex_headers = ["UR"] + [
                 _format_word_tex(word, "ur") for word in segments
@@ -850,24 +1261,29 @@ def eval_rule(
                 ["SR"] + [_format_word_tex(word, "sr") for word in last_outputs]
             )
             rendered = _render_tex_table(tex_headers, tex_rows)
-            output.write_text(rendered, encoding="utf-8")
+            _write_text_output(output, rendered)
         else:
             delimiter = "," if output_format == "csv" else "\t"
             buffer = io.StringIO()
             writer = csv.writer(buffer, delimiter=delimiter)
             writer.writerow(headers)
             writer.writerows(rows)
-            output.write_text(buffer.getvalue(), encoding="utf-8")
-    typer.echo("OK")
+            _write_text_output(output, buffer.getvalue())
+    typer.echo(
+        f"Evaluated {len(selected_rules)} rule(s) on {len(segments)} input word(s)."
+    )
+    typer.echo(
+        f"Wrote {output_format} output to {_display_path(output)}."
+    )
 
 
 @app.command("init")
 def init_samples(
-    output_dir: Path = typer.Argument(
+    path: Path = typer.Argument(
         Path("."),
         dir_okay=True,
         writable=True,
-        help="Directory to write sample alphabet, rules, and input files.",
+        help="Directory to initialize a project in.",
     ),
     force: bool = typer.Option(
         False,
@@ -876,21 +1292,23 @@ def init_samples(
         help="Overwrite existing sample files.",
     ),
 ) -> None:
-    """Generate sample alphabet.csv, rules.toml, and input.toml files.
+    """Initialize a project with sample files and snc2fst.toml.
 
     The sample alphabet has 3 features and 27 symbols, the rules file has
     one rule, and the input file includes multiple example sentences.
     """
+    output_dir = path
     output_dir.mkdir(parents=True, exist_ok=True)
 
     alphabet_path = output_dir / "alphabet.csv"
     rules_path = output_dir / "rules.toml"
     input_path = output_dir / "input.toml"
+    config_path = output_dir / "snc2fst.toml"
 
     if not force:
         existing = [
             path.name
-            for path in (alphabet_path, rules_path, input_path)
+            for path in (alphabet_path, rules_path, input_path, config_path)
             if path.exists()
         ]
         if existing:
@@ -929,6 +1347,13 @@ def init_samples(
     ]
     input_text = "inputs = " + _format_word_list(input_words).rstrip() + "\n"
     input_path.write_text(input_text, encoding="utf-8")
+    config_text = (
+        "[paths]\n"
+        'alphabet = "alphabet.csv"\n'
+        'rules = "rules.toml"\n'
+        'input = "input.toml"\n'
+    )
+    config_path.write_text(config_text, encoding="utf-8")
     base = Path.cwd().resolve()
 
     def _relpath(path: Path) -> Path:
@@ -942,6 +1367,7 @@ def init_samples(
     typer.echo(f"alphabet: {_relpath(alphabet_path)}")
     typer.echo(f"rules: {_relpath(rules_path)}")
     typer.echo(f"input: {_relpath(input_path)}")
+    typer.echo(f"config: {_relpath(config_path)}")
 
 
 def _format_word_list(words: list[list[object]]) -> str:

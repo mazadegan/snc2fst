@@ -45,12 +45,17 @@ def test_cli_smoke(tmp_path: Path) -> None:
     assert result.exit_code == 0, result.output
 
     # compile
-    att_path = tmp_path / "rule.att"
+    out_dir = tmp_path / "rule.att"
     result = runner.invoke(
-        app, ["compile", str(rules), str(alphabet), str(att_path)]
+        app, ["compile", str(tmp_path), "--output", str(out_dir)]
     )
     assert result.exit_code == 0, result.output
+    assert out_dir.exists()
+    assert out_dir.is_dir()
+    att_path = out_dir / "spread_f1_right.att"
+    sym_path = out_dir / "spread_f1_right.sym"
     assert att_path.exists()
+    assert sym_path.exists()
     assert att_path.read_text(encoding="utf-8").strip()
 
     # eval with compare
@@ -59,9 +64,7 @@ def test_cli_smoke(tmp_path: Path) -> None:
         app,
         [
             "eval",
-            str(rules),
-            str(alphabet),
-            str(inputs),
+            str(tmp_path),
             "--output",
             str(out_path),
             "--pynini",

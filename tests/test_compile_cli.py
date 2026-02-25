@@ -47,20 +47,26 @@ def test_compile_writes_att_and_symtab(tmp_path: Path) -> None:
         features=["Voice", "Consonantal"],
     )
 
-    output_path = tmp_path / "rule.att"
+    output_dir = tmp_path / "compiled"
     runner = CliRunner()
     result = runner.invoke(
         app,
         [
             "compile",
+            str(tmp_path),
+            "--rules",
             str(rules_path),
+            "--alphabet",
             str(alphabet_path),
-            str(output_path),
+            "--output",
+            str(output_dir),
         ],
     )
     assert result.exit_code == 0, result.output
 
-    symtab_path = output_path.with_suffix(".sym")
+    output_path = output_dir / "spread_voice_right.att"
+    symtab_path = output_dir / "spread_voice_right.sym"
+    assert output_dir.exists()
     assert output_path.exists()
     assert symtab_path.exists()
     assert output_path.read_text(encoding="utf-8").strip()
@@ -90,20 +96,25 @@ def test_compile_outputs_expected_att_and_symtab(tmp_path: Path) -> None:
         features=["Voice"],
     )
 
-    output_path = tmp_path / "rule.att"
+    output_dir = tmp_path / "compiled"
     runner = CliRunner()
     result = runner.invoke(
         app,
         [
             "compile",
+            str(tmp_path),
+            "--rules",
             str(rules_path),
+            "--alphabet",
             str(alphabet_path),
-            str(output_path),
+            "--output",
+            str(output_dir),
         ],
     )
     assert result.exit_code == 0, result.output
 
-    symtab_path = output_path.with_suffix(".sym")
+    output_path = output_dir / "identity_left.att"
+    symtab_path = output_dir / "identity_left.sym"
     assert output_path.exists()
     assert symtab_path.exists()
 
@@ -156,18 +167,120 @@ def test_compile_respects_max_arcs(tmp_path: Path) -> None:
         features=["Voice", "Consonantal"],
     )
 
-    output_path = tmp_path / "rule.att"
+    output_dir = tmp_path / "compiled"
     runner = CliRunner()
     result = runner.invoke(
         app,
         [
             "compile",
+            str(tmp_path),
+            "--rules",
             str(rules_path),
+            "--alphabet",
             str(alphabet_path),
-            str(output_path),
+            "--output",
+            str(output_dir),
             "--max-arcs",
             "1",
         ],
     )
     assert result.exit_code != 0
     assert "--max-arcs" in result.output
+
+
+def test_compile_directory_mode_uses_project_config(tmp_path: Path) -> None:
+    (tmp_path / "rules.toml").write_text(
+        'id = "rules"\n\n[[rules]]\n'
+        'id = "identity_left"\n'
+        'dir = "LEFT"\n'
+        "inr = []\n"
+        "trm = []\n"
+        "cnd = []\n"
+        'out = "(proj INR *)"\n',
+        encoding="utf-8",
+    )
+    _write_alphabet_csv(
+        tmp_path / "alphabet.csv",
+        symbols=["A", "B"],
+        features=["Voice"],
+    )
+    (tmp_path / "input.toml").write_text(
+        'inputs = [["A"]]\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "snc2fst.toml").write_text(
+        "[paths]\n"
+        'alphabet = "alphabet.csv"\n'
+        'rules = "rules.toml"\n'
+        'input = "input.toml"\n',
+        encoding="utf-8",
+    )
+
+    output_dir = tmp_path / "compiled"
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "compile",
+            str(tmp_path),
+            "--output",
+            str(output_dir),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert (output_dir / "identity_left.att").exists()
+    assert (output_dir / "identity_left.sym").exists()
+
+
+def test_compile_directory_mode_partial_overrides_error(tmp_path: Path) -> None:
+    (tmp_path / "rules.toml").write_text(
+        'id = "rules"\n\n[[rules]]\n'
+        'id = "identity_left"\n'
+        'dir = "LEFT"\n'
+        "inr = []\n"
+        "trm = []\n"
+        "cnd = []\n"
+        'out = "(proj INR *)"\n',
+        encoding="utf-8",
+    )
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "compile",
+            str(tmp_path),
+            "--rules",
+            str(tmp_path / "rules.toml"),
+        ],
+    )
+    assert result.exit_code != 0
+    assert "partial explicit overrides" in result.output
+
+
+def test_compile_directory_mode_defaults_to_compiled_dir(tmp_path: Path) -> None:
+    (tmp_path / "rules.toml").write_text(
+        'id = "rules"\n\n[[rules]]\n'
+        'id = "identity_left"\n'
+        'dir = "LEFT"\n'
+        "inr = []\n"
+        "trm = []\n"
+        "cnd = []\n"
+        'out = "(proj INR *)"\n',
+        encoding="utf-8",
+    )
+    _write_alphabet_csv(
+        tmp_path / "alphabet.csv",
+        symbols=["A", "B"],
+        features=["Voice"],
+    )
+    (tmp_path / "input.toml").write_text(
+        'inputs = [["A"]]\n',
+        encoding="utf-8",
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["compile", str(tmp_path)])
+    assert result.exit_code == 0, result.output
+    output_dir = tmp_path / "compiled"
+    assert (output_dir / "identity_left.att").exists()
+    assert (output_dir / "identity_left.sym").exists()
