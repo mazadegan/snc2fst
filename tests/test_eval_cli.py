@@ -433,6 +433,57 @@ def test_eval_cli_uses_tokenizer_separator_from_config(tmp_path: Path) -> None:
     assert output["inputs"] == [["a", "b"]]
 
 
+def test_eval_cli_uses_segments_from_config(tmp_path: Path) -> None:
+    rules = {
+        "id": "rules",
+        "rules": [
+            {
+                "id": "identity_left",
+                "dir": "LEFT",
+                "inr": [],
+                "trm": [],
+                "cnd": [],
+                "out": "(proj INR *)",
+            }
+        ]
+    }
+    rules_path = tmp_path / "rules.json"
+    rules_path.write_text(json.dumps(rules), encoding="utf-8")
+    alphabet_path = tmp_path / "alphabet.csv"
+    alphabet_path.write_text(
+        ",u,y\nF1,+,+\nF2,-,-\nF3,+,-\n",
+        encoding="utf-8",
+    )
+    input_path = tmp_path / "input.toml"
+    input_path.write_text('inputs = ["U"]\n', encoding="utf-8")
+    (tmp_path / "snc2fst.toml").write_text(
+        "[segments]\n"
+        "U = '(intersect (sym \"u\") (sym \"y\"))'\n",
+        encoding="utf-8",
+    )
+    output_path = tmp_path / "output.json"
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "eval",
+            str(tmp_path),
+            "--rules",
+            str(rules_path),
+            "--alphabet",
+            str(alphabet_path),
+            "--input",
+            str(input_path),
+            "--output",
+            str(output_path),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    output = json.loads(output_path.read_text(encoding="utf-8"))
+    assert output["inputs"] == [["U"]]
+
+
 def test_eval_cli_non_strict_emits_bundle(tmp_path: Path) -> None:
     rules = {
         "id": "rules",
@@ -491,6 +542,64 @@ def test_eval_cli_non_strict_emits_bundle(tmp_path: Path) -> None:
             }
         ],
     }
+
+
+def test_eval_cli_non_strict_allows_bundle_between_rules(tmp_path: Path) -> None:
+    rules = {
+        "id": "rules",
+        "rules": [
+            {
+                "id": "make_bundle",
+                "dir": "LEFT",
+                "inr": [["+", "Voice"]],
+                "trm": [],
+                "cnd": [],
+                "out": "(bundle (- Voice))",
+            },
+            {
+                "id": "identity_after_bundle",
+                "dir": "LEFT",
+                "inr": [],
+                "trm": [],
+                "cnd": [],
+                "out": "(proj INR *)",
+            },
+        ]
+    }
+    rules_path = tmp_path / "rules.json"
+    rules_path.write_text(json.dumps(rules), encoding="utf-8")
+
+    alphabet_path = tmp_path / "alphabet.csv"
+    alphabet_path.write_text(
+        ",a,b\nVoice,+,+\nConsonantal,0,+\n",
+        encoding="utf-8",
+    )
+
+    input_path = tmp_path / "input.json"
+    input_path.write_text(json.dumps([["a", "b"]]), encoding="utf-8")
+
+    output_path = tmp_path / "output.json"
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "eval",
+            str(tmp_path),
+            "--rules",
+            str(rules_path),
+            "--alphabet",
+            str(alphabet_path),
+            "--input",
+            str(input_path),
+            "--output",
+            str(output_path),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    output = json.loads(output_path.read_text(encoding="utf-8"))
+    assert output["rows"][0]["rule_id"] == "make_bundle"
+    assert isinstance(output["rows"][0]["outputs"][0][1], dict)
+    assert output["rows"][1]["rule_id"] == "identity_after_bundle"
 
 
 def test_eval_cli_pynini_compare_right_rule(tmp_path: Path) -> None:

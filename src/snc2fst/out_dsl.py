@@ -16,6 +16,8 @@ class OutDslContext:
     inr: FeatureBundle
     trm: FeatureBundle
     features: set[str]
+    symbols: dict[str, FeatureBundle]
+    allowed_ops: set[str] | None
 
 
 def evaluate_out_dsl(
@@ -24,6 +26,8 @@ def evaluate_out_dsl(
     inr: FeatureBundle,
     trm: FeatureBundle,
     features: set[str],
+    symbols: dict[str, FeatureBundle] | None = None,
+    allowed_ops: set[str] | None = None,
 ) -> FeatureBundle:
     tokens = _tokenize(text)
     if not tokens:
@@ -35,6 +39,8 @@ def evaluate_out_dsl(
         inr=_validate_bundle(inr),
         trm=_validate_bundle(trm),
         features=features,
+        symbols={k: _validate_bundle(v) for k, v in (symbols or {}).items()},
+        allowed_ops=allowed_ops,
     )
     return _eval(ast, context)
 
@@ -57,6 +63,11 @@ def extract_out_features(text: str) -> set[str]:
 def extract_trm_dependent_features(text: str) -> set[str]:
     ast = parse_out_dsl(text)
     return _collect_trm_dependent_features(ast)
+
+
+def extract_out_ops(text: str) -> set[str]:
+    ast = parse_out_dsl(text)
+    return _collect_ops(ast)
 
 
 def out_uses_full_trm(text: str) -> bool:
@@ -88,6 +99,14 @@ def _validate_bundle(bundle: FeatureBundle) -> FeatureBundle:
         if not feature.strip():
             raise OutDslError("Feature names cannot be empty.")
     return dict(bundle)
+
+
+def _unquote_symbol(token: str) -> str:
+    if len(token) >= 2 and token[0] == '"' and token[-1] == '"':
+        return token[1:-1]
+    if len(token) >= 2 and token[0] == "'" and token[-1] == "'":
+        return token[1:-1]
+    return token
 
 
 def _tokenize(text: str) -> list[str]:
@@ -142,6 +161,11 @@ def _eval(node: object, context: OutDslContext) -> FeatureBundle:
     op = node[0]
     if not isinstance(op, str):
         raise OutDslError("Operator must be a symbol.")
+    if context.allowed_ops is not None and op not in context.allowed_ops:
+        allowed = ", ".join(sorted(context.allowed_ops))
+        raise OutDslError(
+            f"Operator not allowed in this context: {op!r}. Allowed: {allowed}"
+        )
 
     if op == "bundle":
         return _eval_bundle(node, context)
@@ -151,6 +175,10 @@ def _eval(node: object, context: OutDslContext) -> FeatureBundle:
         return _eval_unify(node, context)
     if op == "subtract":
         return _eval_subtract(node, context)
+    if op == "intersect":
+        return _eval_intersect(node, context)
+    if op == "sym":
+        return _eval_sym(node, context)
 
     raise OutDslError(f"Unknown operator: {op!r}")
 
@@ -186,12 +214,14 @@ def _collect_features(node: OutDslAst) -> set[str]:
                 raise OutDslError("Feature list entries must be symbols.")
             listed.add(item)
         return bundle_features | listed
-    if op in {"unify", "subtract"}:
+    if op in {"unify", "subtract", "intersect"}:
         if len(node) != 3:
             raise OutDslError(f"{op} expects 2 arguments.")
         left = _collect_features(node[1])
         right = _collect_features(node[2])
         return left | right
+    if op == "sym":
+        return set()
 
     raise OutDslError(f"Unknown operator: {op!r}")
 
@@ -208,6 +238,20 @@ def _collect_bundle_features(node: list[object]) -> set[str]:
             raise OutDslError("bundle feature must be a non-empty symbol.")
         listed.add(feature)
     return listed
+
+
+def _collect_ops(node: OutDslAst) -> set[str]:
+    if isinstance(node, str):
+        return set()
+    if not isinstance(node, list) or not node:
+        raise OutDslError("Invalid expression.")
+    op = node[0]
+    if not isinstance(op, str):
+        raise OutDslError("Operator must be a symbol.")
+    ops = {op}
+    for item in node[1:]:
+        ops |= _collect_ops(item)
+    return ops
 
 
 def _collect_trm_dependent_features(node: OutDslAst) -> set[str]:
@@ -262,7 +306,7 @@ def _collect_trm_dependent_features_inner(
             trm_features |= listed
         return trm_features, bundle_has_trm
 
-    if op in {"unify", "subtract"}:
+    if op in {"unify", "subtract", "intersect"}:
         if len(node) != 3:
             raise OutDslError(f"{op} expects 2 arguments.")
         left_has_trm = _has_trm(node[1])
@@ -275,6 +319,10 @@ def _collect_trm_dependent_features_inner(
             node[2], trm_context=trm_context or has_trm_here
         )
         return left_features | right_features, has_trm_here
+    if op == "sym":
+        if len(node) != 2:
+            raise OutDslError("sym expects 1 argument.")
+        return set(), False
 
     raise OutDslError(f"Unknown operator: {op!r}")
 
@@ -297,10 +345,14 @@ def _has_trm(node: OutDslAst) -> bool:
         if len(node) != 3:
             raise OutDslError("proj expects 2 arguments.")
         return _has_trm(node[1])
-    if op in {"unify", "subtract"}:
+    if op in {"unify", "subtract", "intersect"}:
         if len(node) != 3:
             raise OutDslError(f"{op} expects 2 arguments.")
         return _has_trm(node[1]) or _has_trm(node[2])
+    if op == "sym":
+        if len(node) != 2:
+            raise OutDslError("sym expects 1 argument.")
+        return False
     raise OutDslError(f"Unknown operator: {op!r}")
 
 
@@ -326,12 +378,16 @@ def _has_unprojected_trm(
         if len(node) != 3:
             raise OutDslError("proj expects 2 arguments.")
         return _has_unprojected_trm(node[1], projected=True)
-    if op in {"unify", "subtract"}:
+    if op in {"unify", "subtract", "intersect"}:
         if len(node) != 3:
             raise OutDslError(f"{op} expects 2 arguments.")
         return _has_unprojected_trm(
             node[1], projected=projected
         ) or _has_unprojected_trm(node[2], projected=projected)
+    if op == "sym":
+        if len(node) != 2:
+            raise OutDslError("sym expects 1 argument.")
+        return False
     raise OutDslError(f"Unknown operator: {op!r}")
 
 
@@ -353,10 +409,14 @@ def _has_all(node: OutDslAst) -> bool:
         if len(node) != 3:
             raise OutDslError("proj expects 2 arguments.")
         return _has_all(node[1]) or node[2] == "*"
-    if op in {"unify", "subtract"}:
+    if op in {"unify", "subtract", "intersect"}:
         if len(node) != 3:
             raise OutDslError(f"{op} expects 2 arguments.")
         return _has_all(node[1]) or _has_all(node[2])
+    if op == "sym":
+        if len(node) != 2:
+            raise OutDslError("sym expects 1 argument.")
+        return False
     raise OutDslError(f"Unknown operator: {op!r}")
 
 
@@ -376,12 +436,16 @@ def _has_bare_target(node: OutDslAst, target: str, *, in_proj: bool = False) -> 
         if len(node) != 3:
             raise OutDslError("proj expects 2 arguments.")
         return _has_bare_target(node[1], target, in_proj=True)
-    if op in {"unify", "subtract"}:
+    if op in {"unify", "subtract", "intersect"}:
         if len(node) != 3:
             raise OutDslError(f"{op} expects 2 arguments.")
         return _has_bare_target(node[1], target, in_proj=in_proj) or _has_bare_target(
             node[2], target, in_proj=in_proj
         )
+    if op == "sym":
+        if len(node) != 2:
+            raise OutDslError("sym expects 1 argument.")
+        return False
     raise OutDslError(f"Unknown operator: {op!r}")
 
 
@@ -405,10 +469,14 @@ def _has_proj_star(node: OutDslAst, target: str) -> bool:
         if feature_list == "*" and _bundle_is_target(bundle, target):
             return True
         return _has_proj_star(bundle, target)
-    if op in {"unify", "subtract"}:
+    if op in {"unify", "subtract", "intersect"}:
         if len(node) != 3:
             raise OutDslError(f"{op} expects 2 arguments.")
         return _has_proj_star(node[1], target) or _has_proj_star(node[2], target)
+    if op == "sym":
+        if len(node) != 2:
+            raise OutDslError("sym expects 1 argument.")
+        return False
     raise OutDslError(f"Unknown operator: {op!r}")
 
 
@@ -424,7 +492,7 @@ def _bundle_is_target(node: OutDslAst, target: str) -> bool:
         if len(node) != 3:
             raise OutDslError("proj expects 2 arguments.")
         return _bundle_is_target(node[1], target)
-    if op in {"unify", "subtract", "bundle"}:
+    if op in {"unify", "subtract", "intersect", "bundle", "sym"}:
         return False
     raise OutDslError(f"Unknown operator: {op!r}")
 
@@ -494,3 +562,27 @@ def _eval_subtract(node: list[object], context: OutDslContext) -> FeatureBundle:
         if feature in result and result[feature] == polarity:
             del result[feature]
     return result
+
+
+def _eval_intersect(node: list[object], context: OutDslContext) -> FeatureBundle:
+    if len(node) != 3:
+        raise OutDslError("intersect expects 2 arguments.")
+    left = _eval(node[1], context)
+    right = _eval(node[2], context)
+    result: FeatureBundle = {}
+    for feature in set(left) & set(right):
+        if left[feature] == right[feature]:
+            result[feature] = left[feature]
+    return result
+
+
+def _eval_sym(node: list[object], context: OutDslContext) -> FeatureBundle:
+    if len(node) != 2:
+        raise OutDslError("sym expects 1 argument.")
+    raw_symbol = node[1]
+    if not isinstance(raw_symbol, str) or not raw_symbol.strip():
+        raise OutDslError("sym expects a non-empty symbol name.")
+    symbol = _unquote_symbol(raw_symbol).strip()
+    if symbol not in context.symbols:
+        raise OutDslError(f"Unknown symbol in sym: {symbol!r}")
+    return dict(context.symbols[symbol])

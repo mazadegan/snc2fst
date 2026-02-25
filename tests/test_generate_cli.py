@@ -43,6 +43,24 @@ def test_init_creates_sample_files(tmp_path: Path) -> None:
             "input": "input.toml",
         },
         "tokenizer": {"separator": ";"},
+        "dsl": {
+            "rules_allowed_ops": [
+                "bundle",
+                "proj",
+                "unify",
+                "subtract",
+                "intersect",
+                "sym",
+            ],
+            "segments_allowed_ops": [
+                "bundle",
+                "proj",
+                "unify",
+                "subtract",
+                "intersect",
+                "sym",
+            ],
+        },
     }
 
     alphabet_lines = alphabet_path.read_text(encoding="utf-8").splitlines()

@@ -30,6 +30,8 @@ def compile_pynini_fst(
     show_progress: bool = False,
     v_features: set[str] | None = None,
     p_features: set[str] | None = None,
+    symbols: dict[str, dict[str, str]] | None = None,
+    allowed_ops: set[str] | None = None,
 ) -> PyniniMachine:
     try:
         import pywrapfst as fst
@@ -64,7 +66,12 @@ def compile_pynini_fst(
             bundle_from_tuple(trm_p, p_order) if trm_p is not None else {}
         )
         out_bundle = evaluate_out_dsl(
-            rule.out, inr=inr_bundle, trm=trm_bundle, features=v_features
+            rule.out,
+            inr=inr_bundle,
+            trm=trm_bundle,
+            features=v_features,
+            symbols=symbols,
+            allowed_ops=allowed_ops,
         )
         return tuple_from_bundle(out_bundle, v_order)
 
@@ -186,6 +193,8 @@ def evaluate_with_pynini(
     strict: bool,
     v_features: set[str] | None = None,
     p_features: set[str] | None = None,
+    symbols: dict[str, dict[str, str]] | None = None,
+    allowed_ops: set[str] | None = None,
 ) -> list[list[object]]:
     try:
         import pywrapfst as fst
@@ -195,7 +204,11 @@ def evaluate_with_pynini(
         ) from exc
 
     machine = compile_pynini_fst(
-        rule, v_features=v_features, p_features=p_features
+        rule,
+        v_features=v_features,
+        p_features=p_features,
+        symbols=symbols,
+        allowed_ops=allowed_ops,
     )
     v_order = machine.v_order
     if not set(v_order).issubset(set(feature_order)):
@@ -215,9 +228,31 @@ def evaluate_with_pynini(
         input_labels: list[int] = []
         input_bundles: list[dict[str, str]] = []
         for sym in word_symbols:
+            if isinstance(sym, dict):
+                bundle: dict[str, str] = {}
+                for feature, value in sym.items():
+                    if (
+                        not isinstance(feature, str)
+                        or feature not in feature_order
+                    ):
+                        raise typer.BadParameter(
+                            f"Word {idx} has invalid bundle feature: {feature!r}"
+                        )
+                    if value not in {"+", "-", "0"}:
+                        raise typer.BadParameter(
+                            f"Word {idx} has invalid bundle value for {feature!r}: {value!r}"
+                        )
+                    if value in {"+", "-"}:
+                        bundle[feature] = value
+                input_bundles.append(bundle)
+                input_labels.append(
+                    _encode_tv_label(_bundle_to_tv_tuple(bundle, v_order))
+                )
+                continue
             if not isinstance(sym, str) or not sym.strip():
                 raise typer.BadParameter(
-                    f"Word {idx} contains a non-string symbol."
+                    f"Word {idx} contains a non-string symbol: {sym!r} "
+                    f"(type {type(sym).__name__})."
                 )
             if sym not in symbol_to_bundle:
                 raise typer.BadParameter(

@@ -12,8 +12,8 @@ import typer
 from pydantic import ValidationError
 
 from ._version import __version__
-from .alphabet import Alphabet, format_validation_error
-from .out_dsl import OutDslError, evaluate_out_dsl
+from .alphabet import Alphabet, SymbolFeatures, format_validation_error
+from .out_dsl import OutDslError, evaluate_out_dsl, extract_out_ops
 from .rules import RulesFile, Rule
 from .compile_pynini_fst import (
     compile_pynini_fst,
@@ -61,7 +61,7 @@ def _normalize_value(value: str) -> str:
 @app.command()
 def version() -> None:
     """Print the snc2fst version."""
-    typer.echo(__version__)
+    typer.echo(f"v{__version__}")
 
 
 def _table_to_json(
@@ -296,7 +296,8 @@ def _validate_input_segments_shape(payload: list[object]) -> None:
             for sym in word:
                 if not isinstance(sym, str) or not sym.strip():
                     raise typer.BadParameter(
-                        f"Word {idx} contains a non-string symbol."
+                        f"Word {idx} contains a non-string symbol: {sym!r} "
+                        f"(type {type(sym).__name__})."
                     )
             continue
         raise typer.BadParameter(
@@ -393,13 +394,149 @@ def _load_project_tokenizer_separator(directory: Path) -> str:
     return separator
 
 
-def _validate_configured_project_path(key: str, path: Path) -> None:
+def _load_project_dsl_allowed_ops(
+    directory: Path, context: str
+) -> set[str] | None:
+    config_path = directory / "snc2fst.toml"
+    if not config_path.exists():
+        return None
+    payload = _load_toml(config_path)
+    if not isinstance(payload, dict):
+        raise typer.BadParameter(
+            "snc2fst.toml must be a TOML table/object."
+        )
+    dsl_obj = payload.get("dsl", {})
+    if dsl_obj is None:
+        dsl_obj = {}
+    if not isinstance(dsl_obj, dict):
+        raise typer.BadParameter("snc2fst.toml [dsl] must be a TOML table.")
+    key = f"{context}_allowed_ops"
+    raw_ops = dsl_obj.get(key)
+    if raw_ops is None:
+        return None
+    if not isinstance(raw_ops, list):
+        raise typer.BadParameter(
+            f"snc2fst.toml dsl.{key} must be an array of operator names."
+        )
+    ops: set[str] = set()
+    for item in raw_ops:
+        if not isinstance(item, str) or not item.strip():
+            raise typer.BadParameter(
+                f"snc2fst.toml dsl.{key} entries must be non-empty strings."
+            )
+        op = item.strip()
+        if op not in _ALL_DSL_OPS:
+            allowed = ", ".join(sorted(_ALL_DSL_OPS))
+            raise typer.BadParameter(
+                f"snc2fst.toml dsl.{key} has unknown operator {op!r}. "
+                f"Allowed operators: {allowed}"
+            )
+        ops.add(op)
+    return ops
+
+
+def _load_project_segments(directory: Path) -> dict[str, str]:
+    config_path = directory / "snc2fst.toml"
+    if not config_path.exists():
+        return {}
+    payload = _load_toml(config_path)
+    if not isinstance(payload, dict):
+        raise typer.BadParameter(
+            "snc2fst.toml must be a TOML table/object."
+        )
+    segments_obj = payload.get("segments", {})
+    if segments_obj is None:
+        segments_obj = {}
+    if not isinstance(segments_obj, dict):
+        raise typer.BadParameter(
+            "snc2fst.toml [segments] must be a TOML table."
+        )
+    result: dict[str, str] = {}
+    for symbol, expr in segments_obj.items():
+        if not isinstance(symbol, str) or not symbol.strip():
+            raise typer.BadParameter(
+                "snc2fst.toml [segments] keys must be non-empty symbol names."
+            )
+        if not isinstance(expr, str) or not expr.strip():
+            raise typer.BadParameter(
+                f"snc2fst.toml [segments].{symbol} must be a non-empty DSL expression string."
+            )
+        result[symbol.strip()] = expr.strip()
+    return result
+
+
+def _sparse_symbol_bundle(features: dict[str, str]) -> dict[str, str]:
+    return {feature: value for feature, value in features.items() if value in {"+", "-"}}
+
+
+def _expand_alphabet_with_segments(
+    alphabet: Alphabet,
+    *,
+    project_dir: Path | None,
+    segment_allowed_ops: set[str] | None,
+) -> Alphabet:
+    if project_dir is None:
+        return alphabet
+    segments = _load_project_segments(project_dir)
+    if not segments:
+        return alphabet
+
+    feature_order = list(alphabet.feature_schema.features)
+    rows = list(alphabet.rows)
+    symbol_order = list(alphabet.feature_schema.symbols)
+    existing_symbols = set(symbol_order)
+    symbol_to_bundle: dict[str, dict[str, str]] = {
+        row.symbol: _sparse_symbol_bundle(row.features) for row in rows
+    }
+    features_set = set(feature_order)
+
+    for symbol, expr in segments.items():
+        if symbol in existing_symbols:
+            raise typer.BadParameter(
+                f"Segment {symbol!r} already exists in alphabet symbols."
+            )
+        bundle = evaluate_out_dsl(
+            expr,
+            inr={},
+            trm={},
+            features=features_set,
+            symbols=symbol_to_bundle,
+            allowed_ops=segment_allowed_ops,
+        )
+        full = {
+            feature: bundle.get(feature, "0") for feature in feature_order
+        }
+        rows.append(SymbolFeatures(symbol=symbol, features=full))
+        symbol_order.append(symbol)
+        existing_symbols.add(symbol)
+        symbol_to_bundle[symbol] = _sparse_symbol_bundle(full)
+
+    return Alphabet(
+        feature_schema={
+            "symbols": symbol_order,
+            "features": feature_order,
+        },
+        rows=rows,
+    )
+
+
+def _validate_configured_project_path(
+    key: str,
+    path: Path,
+    *,
+    project_dir: Path,
+    segment_allowed_ops: set[str] | None,
+) -> None:
     cli_flag = f"--{key}"
     try:
         if key == "rules":
             _load_rules_file(path)
         elif key == "alphabet":
-            _load_alphabet(path)
+            _load_alphabet(
+                path,
+                project_dir=project_dir,
+                segment_allowed_ops=segment_allowed_ops,
+            )
         elif key == "input":
             payload = _load_input_payload(path)
             _validate_input_segments_shape(payload)
@@ -494,6 +631,7 @@ def _load_input_payload(path: Path) -> list[object]:
 
 _DEFAULT_INPUT_TOKEN_SEPARATOR = ";"
 _MAX_AMBIGUOUS_TOKENIZATIONS = 100
+_ALL_DSL_OPS = {"bundle", "proj", "unify", "subtract", "intersect", "sym"}
 
 
 def _build_symbol_trie(symbols: set[str]) -> dict[str, object]:
@@ -585,7 +723,8 @@ def _tokenize_input_words(
             for sym in word:
                 if not isinstance(sym, str) or not sym.strip():
                     raise typer.BadParameter(
-                        f"Word {idx} contains a non-string symbol."
+                        f"Word {idx} contains a non-string symbol: {sym!r} "
+                        f"(type {type(sym).__name__})."
                     )
                 token = sym.strip()
                 if token not in symbols:
@@ -648,6 +787,15 @@ def _tokenize_input_words(
 
 
 def _load_alphabet_features(alphabet_path: Path) -> set[str]:
+    return set(_load_alphabet(alphabet_path).feature_schema.features)
+
+
+def _load_alphabet(
+    alphabet_path: Path,
+    *,
+    project_dir: Path | None = None,
+    segment_allowed_ops: set[str] | None = None,
+) -> Alphabet:
     if alphabet_path.suffix.lower() not in {".csv", ".tsv", ".tab"}:
         raise typer.BadParameter("Alphabet must be a CSV/TSV feature table.")
     payload = json.loads(_table_to_json(alphabet_path, delimiter=None))
@@ -655,17 +803,11 @@ def _load_alphabet_features(alphabet_path: Path) -> set[str]:
         alphabet = Alphabet.model_validate(payload)
     except ValidationError as exc:
         raise typer.BadParameter(format_validation_error(exc)) from exc
-    return set(alphabet.feature_schema.features)
-
-
-def _load_alphabet(alphabet_path: Path) -> Alphabet:
-    if alphabet_path.suffix.lower() not in {".csv", ".tsv", ".tab"}:
-        raise typer.BadParameter("Alphabet must be a CSV/TSV feature table.")
-    payload = json.loads(_table_to_json(alphabet_path, delimiter=None))
-    try:
-        return Alphabet.model_validate(payload)
-    except ValidationError as exc:
-        raise typer.BadParameter(format_validation_error(exc)) from exc
+    return _expand_alphabet_with_segments(
+        alphabet,
+        project_dir=project_dir,
+        segment_allowed_ops=segment_allowed_ops,
+    )
 
 
 def _bundle_from_rule(rule: Rule, label: str) -> dict[str, str]:
@@ -686,7 +828,11 @@ def _validate_rule_features(
 
 
 def _validate_rules_against_alphabet(
-    rules_file: RulesFile, alphabet_features: set[str]
+    rules_file: RulesFile,
+    alphabet_features: set[str],
+    *,
+    symbol_to_bundle: dict[str, dict[str, str]] | None = None,
+    allowed_ops: set[str] | None = None,
 ) -> None:
     for rule in rules_file.rules:
         _validate_rule_features(rule, alphabet_features, "inr")
@@ -698,6 +844,8 @@ def _validate_rules_against_alphabet(
                 inr=_bundle_from_rule(rule, "inr"),
                 trm=_bundle_from_rule(rule, "trm"),
                 features=alphabet_features,
+                symbols=symbol_to_bundle,
+                allowed_ops=allowed_ops,
             )
         except OutDslError as exc:
             raise typer.BadParameter(
@@ -959,6 +1107,11 @@ def compile_rule(
     """
     if not target.is_dir():
         raise typer.BadParameter("TARGET must be a directory.")
+    project_dir = target.resolve()
+    rule_allowed_ops = _load_project_dsl_allowed_ops(project_dir, "rules")
+    segment_allowed_ops = _load_project_dsl_allowed_ops(
+        project_dir, "segments"
+    )
     _require_all_overrides(
         command_name="compile",
         overrides={"rules": rules_path_opt, "alphabet": alphabet_opt},
@@ -970,7 +1123,7 @@ def compile_rule(
         typer.echo(f"  rules: {_display_path(rules_path)}")
         typer.echo(f"  alphabet: {_display_path(alphabet_path)}")
     else:
-        directory = target.resolve()
+        directory = project_dir
         config_paths, has_config = _load_project_paths(directory)
         if has_config:
             typer.echo(
@@ -979,10 +1132,18 @@ def compile_rule(
         else:
             typer.echo("No snc2fst.toml found; discovering files in directory.")
         if "rules" in config_paths:
-            _validate_configured_project_path("rules", config_paths["rules"])
+            _validate_configured_project_path(
+                "rules",
+                config_paths["rules"],
+                project_dir=directory,
+                segment_allowed_ops=segment_allowed_ops,
+            )
         if "alphabet" in config_paths:
             _validate_configured_project_path(
-                "alphabet", config_paths["alphabet"]
+                "alphabet",
+                config_paths["alphabet"],
+                project_dir=directory,
+                segment_allowed_ops=segment_allowed_ops,
             )
         rules_path = config_paths.get("rules") or _resolve_candidate(
             label="rules",
@@ -1002,15 +1163,28 @@ def compile_rule(
     if output_opt is not None:
         output_dir = output_opt
     else:
-        output_dir = target.resolve() / "compiled"
+        output_dir = project_dir / "compiled"
 
     rules_file = _load_rules_file(rules_path)
     rules_list = rules_file.rules
 
     from .feature_analysis import compute_p_features, compute_v_features
 
-    features = _load_alphabet_features(alphabet_path)
-    _validate_rules_against_alphabet(rules_file, features)
+    alphabet_data = _load_alphabet(
+        alphabet_path,
+        project_dir=project_dir,
+        segment_allowed_ops=segment_allowed_ops,
+    )
+    features = set(alphabet_data.feature_schema.features)
+    symbol_to_bundle = {
+        row.symbol: _sparse_symbol_bundle(row.features) for row in alphabet_data.rows
+    }
+    _validate_rules_against_alphabet(
+        rules_file,
+        features,
+        symbol_to_bundle=symbol_to_bundle,
+        allowed_ops=rule_allowed_ops,
+    )
 
     if rule_id is not None:
         selected_rules = [_select_rule(rules_list, rule_id)]
@@ -1046,6 +1220,8 @@ def compile_rule(
             show_progress=progress,
             v_features=v_features,
             p_features=p_features,
+            symbols=symbol_to_bundle,
+            allowed_ops=rule_allowed_ops,
         )
         before_counts = None
         if normalize:
@@ -1191,7 +1367,12 @@ def eval_rule(
     """
     if not target.is_dir():
         raise typer.BadParameter("TARGET must be a directory.")
-    tokenizer_separator = _load_project_tokenizer_separator(target.resolve())
+    project_dir = target.resolve()
+    tokenizer_separator = _load_project_tokenizer_separator(project_dir)
+    rule_allowed_ops = _load_project_dsl_allowed_ops(project_dir, "rules")
+    segment_allowed_ops = _load_project_dsl_allowed_ops(
+        project_dir, "segments"
+    )
     _require_all_overrides(
         command_name="eval",
         overrides={
@@ -1213,7 +1394,7 @@ def eval_rule(
         typer.echo(f"  alphabet: {_display_path(alphabet_path)}")
         typer.echo(f"  input: {_display_path(input_words_path)}")
     else:
-        directory = target.resolve()
+        directory = project_dir
         config_paths, has_config = _load_project_paths(directory)
         if has_config:
             typer.echo(
@@ -1222,13 +1403,26 @@ def eval_rule(
         else:
             typer.echo("No snc2fst.toml found; discovering files in directory.")
         if "rules" in config_paths:
-            _validate_configured_project_path("rules", config_paths["rules"])
+            _validate_configured_project_path(
+                "rules",
+                config_paths["rules"],
+                project_dir=directory,
+                segment_allowed_ops=segment_allowed_ops,
+            )
         if "alphabet" in config_paths:
             _validate_configured_project_path(
-                "alphabet", config_paths["alphabet"]
+                "alphabet",
+                config_paths["alphabet"],
+                project_dir=directory,
+                segment_allowed_ops=segment_allowed_ops,
             )
         if "input" in config_paths:
-            _validate_configured_project_path("input", config_paths["input"])
+            _validate_configured_project_path(
+                "input",
+                config_paths["input"],
+                project_dir=directory,
+                segment_allowed_ops=segment_allowed_ops,
+            )
         rules_path = config_paths.get("rules") or _resolve_candidate(
             label="rules",
             candidates=_discover_rules_candidates(directory),
@@ -1253,10 +1447,22 @@ def eval_rule(
     rules_file = _load_rules_file(rules_path)
     rules_list = rules_file.rules
 
-    alphabet_data = _load_alphabet(alphabet_path)
+    alphabet_data = _load_alphabet(
+        alphabet_path,
+        project_dir=project_dir,
+        segment_allowed_ops=segment_allowed_ops,
+    )
     feature_order = tuple(alphabet_data.feature_schema.features)
     features = set(feature_order)
-    _validate_rules_against_alphabet(rules_file, features)
+    symbol_to_bundle_sparse = {
+        row.symbol: _sparse_symbol_bundle(row.features) for row in alphabet_data.rows
+    }
+    _validate_rules_against_alphabet(
+        rules_file,
+        features,
+        symbol_to_bundle=symbol_to_bundle_sparse,
+        allowed_ops=rule_allowed_ops,
+    )
 
     from .feature_analysis import compute_p_features, compute_v_features
 
@@ -1267,15 +1473,30 @@ def eval_rule(
     segments_payload = _load_input_payload(input_words_path)
 
     symbol_to_bundle: dict[str, dict[str, str]] = {}
-    bundle_to_symbol: dict[tuple[str, ...], str] = {}
+    bundle_to_symbols: dict[tuple[str, ...], list[str]] = {}
     for row in alphabet_data.rows:
         symbol_to_bundle[row.symbol] = dict(row.features)
         bundle_key = tuple(row.features[feature] for feature in feature_order)
-        if bundle_key in bundle_to_symbol:
-            raise typer.BadParameter(
-                f"Alphabet has multiple symbols for bundle: {bundle_key}"
-            )
-        bundle_to_symbol[bundle_key] = row.symbol
+        bundle_to_symbols.setdefault(bundle_key, []).append(row.symbol)
+
+    duplicate_bundle_entries = [
+        (bundle_key, symbols)
+        for bundle_key, symbols in bundle_to_symbols.items()
+        if len(symbols) > 1
+    ]
+    if duplicate_bundle_entries:
+        details = "; ".join(
+            f"{symbols} -> {bundle_key}"
+            for bundle_key, symbols in duplicate_bundle_entries
+        )
+        raise typer.BadParameter(
+            "Alphabet has multiple symbols for one or more bundles: "
+            f"{details}"
+        )
+
+    bundle_to_symbol: dict[tuple[str, ...], str] = {
+        bundle_key: symbols[0] for bundle_key, symbols in bundle_to_symbols.items()
+    }
 
     segments = _tokenize_input_words(
         segments_payload,
@@ -1318,6 +1539,8 @@ def eval_rule(
                 strict=strict,
                 v_features=v_features,
                 p_features=p_features,
+                dsl_symbols=symbol_to_bundle_sparse,
+                dsl_allowed_ops=rule_allowed_ops,
             )
             if compare:
                 ref_words = _evaluate_with_reference(
@@ -1328,6 +1551,8 @@ def eval_rule(
                     bundle_to_symbol=bundle_to_symbol,
                     strict=strict,
                     v_order=v_order,
+                    dsl_symbols=symbol_to_bundle_sparse,
+                    dsl_allowed_ops=rule_allowed_ops,
                 )
                 diffs = _diff_word_lists(ref_words, output_words)
                 if diffs:
@@ -1345,6 +1570,8 @@ def eval_rule(
                 bundle_to_symbol=bundle_to_symbol,
                 strict=strict,
                 v_order=v_order,
+                dsl_symbols=symbol_to_bundle_sparse,
+                dsl_allowed_ops=rule_allowed_ops,
             )
 
         if include_input:
@@ -1507,15 +1734,15 @@ def init_samples(
         rows.append(f"{feature}," + ",".join(values))
     alphabet_path.write_text("\n".join(rows) + "\n", encoding="utf-8")
     rules_text = (
-        'id = "sample_rules"\n'
+        "id = 'sample_rules'\n"
         "\n"
         "[[rules]]\n"
-        'id = "spread_f1_right"\n'
-        'dir = "RIGHT"\n'
-        'inr = [["+", "F1"]]\n'
-        'trm = [["+", "F2"]]\n'
+        "id = 'spread_f1_right'\n"
+        "dir = 'RIGHT'\n"
+        "inr = [['+', 'F1']]\n"
+        "trm = [['+', 'F2']]\n"
         "cnd = []\n"
-        'out = "(proj TRM (F1))"\n'
+        "out = '(proj TRM (F1))'\n"
     )
     rules_path.write_text(rules_text, encoding="utf-8")
     input_words = [
@@ -1527,12 +1754,16 @@ def init_samples(
     input_path.write_text(input_text, encoding="utf-8")
     config_text = (
         "[paths]\n"
-        'alphabet = "alphabet.csv"\n'
-        'rules = "rules.toml"\n'
-        'input = "input.toml"\n'
+        "alphabet = 'alphabet.csv'\n"
+        "rules = 'rules.toml'\n"
+        "input = 'input.toml'\n"
         "\n"
         "[tokenizer]\n"
-        f'separator = "{_DEFAULT_INPUT_TOKEN_SEPARATOR}"\n'
+        f"separator = '{_DEFAULT_INPUT_TOKEN_SEPARATOR}'\n"
+        "\n"
+        "[dsl]\n"
+        "rules_allowed_ops = ['bundle', 'proj', 'unify', 'subtract', 'intersect', 'sym']\n"
+        "segments_allowed_ops = ['bundle', 'proj', 'unify', 'subtract', 'intersect', 'sym']\n"
     )
     config_path.write_text(config_text, encoding="utf-8")
     base = Path.cwd().resolve()
@@ -1713,6 +1944,8 @@ def _evaluate_with_reference(
     bundle_to_symbol: dict[tuple[str, ...], str],
     strict: bool,
     v_order: tuple[str, ...] | None = None,
+    dsl_symbols: dict[str, dict[str, str]] | None = None,
+    dsl_allowed_ops: set[str] | None = None,
 ) -> list[list[object]]:
     from .evaluator import (
         evaluate_rule_on_bundles,
@@ -1727,9 +1960,25 @@ def _evaluate_with_reference(
             )
         bundles: list[dict[str, str]] = []
         for sym in word:
+            if isinstance(sym, dict):
+                bundle: dict[str, str] = {}
+                for feature, value in sym.items():
+                    if not isinstance(feature, str) or feature not in feature_order:
+                        raise typer.BadParameter(
+                            f"Word {idx} has invalid bundle feature: {feature!r}"
+                        )
+                    if value not in {"+", "-", "0"}:
+                        raise typer.BadParameter(
+                            f"Word {idx} has invalid bundle value for {feature!r}: {value!r}"
+                        )
+                    if value in {"+", "-"}:
+                        bundle[feature] = value
+                bundles.append(bundle)
+                continue
             if not isinstance(sym, str) or not sym.strip():
                 raise typer.BadParameter(
-                    f"Word {idx} contains a non-string symbol."
+                    f"Word {idx} contains a non-string symbol: {sym!r} "
+                    f"(type {type(sym).__name__})."
                 )
             if sym not in symbol_to_bundle:
                 raise typer.BadParameter(
@@ -1737,10 +1986,19 @@ def _evaluate_with_reference(
                 )
             bundles.append(symbol_to_bundle[sym])
         if v_order is None:
-            evaluated = evaluate_rule_on_bundles(rule, bundles)
+            evaluated = evaluate_rule_on_bundles(
+                rule,
+                bundles,
+                symbols=dsl_symbols,
+                allowed_ops=dsl_allowed_ops,
+            )
         else:
             evaluated = evaluate_rule_on_bundles_with_order(
-                rule, bundles, v_order
+                rule,
+                bundles,
+                v_order,
+                symbols=dsl_symbols,
+                allowed_ops=dsl_allowed_ops,
             )
             v_set = set(v_order)
             reconstructed: list[dict[str, str]] = []
@@ -1780,6 +2038,8 @@ def _evaluate_with_pynini(
     strict: bool,
     v_features: set[str] | None = None,
     p_features: set[str] | None = None,
+    dsl_symbols: dict[str, dict[str, str]] | None = None,
+    dsl_allowed_ops: set[str] | None = None,
 ) -> list[list[object]]:
     return evaluate_with_pynini(
         rule=rule,
@@ -1790,6 +2050,8 @@ def _evaluate_with_pynini(
         strict=strict,
         v_features=v_features,
         p_features=p_features,
+        symbols=dsl_symbols,
+        allowed_ops=dsl_allowed_ops,
     )
 
 

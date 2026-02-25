@@ -14,13 +14,23 @@ from .tuple_utils import (
 
 
 def evaluate_rule_on_bundles(
-    rule: Rule, segments: Iterable[dict[str, str]]
+    rule: Rule,
+    segments: Iterable[dict[str, str]],
+    *,
+    symbols: dict[str, dict[str, str]] | None = None,
+    allowed_ops: set[str] | None = None,
 ) -> list[dict[str, str]]:
     v_order = tuple(sorted(compute_v_features(rule)))
     tuple_segments = [
         tuple_from_bundle(segment, v_order) for segment in segments
     ]
-    result = evaluate_rule_on_tuples(rule, tuple_segments, v_order)
+    result = evaluate_rule_on_tuples(
+        rule,
+        tuple_segments,
+        v_order,
+        symbols=symbols,
+        allowed_ops=allowed_ops,
+    )
     return [bundle_from_tuple(bundle, v_order) for bundle in result]
 
 
@@ -28,16 +38,30 @@ def evaluate_rule_on_bundles_with_order(
     rule: Rule,
     segments: Iterable[dict[str, str]],
     v_order: tuple[str, ...],
+    *,
+    symbols: dict[str, dict[str, str]] | None = None,
+    allowed_ops: set[str] | None = None,
 ) -> list[dict[str, str]]:
     tuple_segments = [
         tuple_from_bundle(segment, v_order) for segment in segments
     ]
-    result = evaluate_rule_on_tuples(rule, tuple_segments, v_order)
+    result = evaluate_rule_on_tuples(
+        rule,
+        tuple_segments,
+        v_order,
+        symbols=symbols,
+        allowed_ops=allowed_ops,
+    )
     return [bundle_from_tuple(bundle, v_order) for bundle in result]
 
 
 def evaluate_rule_on_tuples(
-    rule: Rule, segments: Iterable[BundleTuple], v_order: tuple[str, ...]
+    rule: Rule,
+    segments: Iterable[BundleTuple],
+    v_order: tuple[str, ...],
+    *,
+    symbols: dict[str, dict[str, str]] | None = None,
+    allowed_ops: set[str] | None = None,
 ) -> list[BundleTuple]:
     v_features = set(v_order)
     v_index = {feature: idx for idx, feature in enumerate(v_order)}
@@ -60,7 +84,12 @@ def evaluate_rule_on_tuples(
             inr_bundle = bundle_from_tuple(segment, v_order)
             trm_dict = bundle_from_tuple(trm_bundle, v_order)
             out_bundle = evaluate_out_dsl(
-                rule.out, inr=inr_bundle, trm=trm_dict, features=v_features
+                rule.out,
+                inr=inr_bundle,
+                trm=trm_dict,
+                features=v_features,
+                symbols=symbols,
+                allowed_ops=allowed_ops,
             )
             output[idx] = tuple_from_bundle(out_bundle, v_order)
 
