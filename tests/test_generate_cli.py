@@ -41,7 +41,8 @@ def test_init_creates_sample_files(tmp_path: Path) -> None:
             "alphabet": "alphabet.csv",
             "rules": "rules.toml",
             "input": "input.toml",
-        }
+        },
+        "tokenizer": {"separator": ";"},
     }
 
     alphabet_lines = alphabet_path.read_text(encoding="utf-8").splitlines()

@@ -63,6 +63,58 @@ def test_validate_input_words(tmp_path: Path) -> None:
     assert result.output.strip() == "OK"
 
 
+def test_validate_input_words_accepts_string_inputs(tmp_path: Path) -> None:
+    alphabet_content = ",aa,b\nVoice,0,0\n"
+    alphabet_path = tmp_path / "alphabet.csv"
+    alphabet_path.write_text(alphabet_content, encoding="utf-8")
+
+    input_path = tmp_path / "input.toml"
+    input_path.write_text(
+        'inputs = ["aab", "b"]\n',
+        encoding="utf-8",
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "validate",
+            "input",
+            str(input_path),
+            str(alphabet_path),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert result.output.strip() == "OK"
+
+
+def test_validate_input_words_reports_ambiguity(tmp_path: Path) -> None:
+    alphabet_content = ",a,aa,b\nVoice,0,0,0\n"
+    alphabet_path = tmp_path / "alphabet.csv"
+    alphabet_path.write_text(alphabet_content, encoding="utf-8")
+
+    input_path = tmp_path / "input.toml"
+    input_path.write_text(
+        'inputs = ["aab"]\n',
+        encoding="utf-8",
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "validate",
+            "input",
+            str(input_path),
+            str(alphabet_path),
+        ],
+    )
+    assert result.exit_code != 0
+    assert "ambiguously tokenized" in result.output
+    assert "aa;b" in result.output
+    assert "a;a;b" in result.output
+
+
 def test_validate_rules_dump_vp(tmp_path: Path) -> None:
     alphabet_content = ",a\nVoice,0\nConsonantal,0\n"
     alphabet_path = tmp_path / "alphabet.csv"

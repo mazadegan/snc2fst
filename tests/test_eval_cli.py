@@ -243,6 +243,196 @@ def test_eval_cli_outputs_json(tmp_path: Path) -> None:
     }
 
 
+def test_eval_cli_tokenizes_string_input(tmp_path: Path) -> None:
+    rules = {
+        "id": "rules",
+        "rules": [
+            {
+                "id": "identity_left",
+                "dir": "LEFT",
+                "inr": [],
+                "trm": [],
+                "cnd": [],
+                "out": "(proj INR *)",
+            }
+        ]
+    }
+    rules_path = tmp_path / "rules.json"
+    rules_path.write_text(json.dumps(rules), encoding="utf-8")
+    alphabet_path = tmp_path / "alphabet.csv"
+    alphabet_path.write_text(
+        ",aa,b\nVoice,+,-\n",
+        encoding="utf-8",
+    )
+    input_path = tmp_path / "input.toml"
+    input_path.write_text('inputs = ["aab"]\n', encoding="utf-8")
+    output_path = tmp_path / "output.json"
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "eval",
+            str(tmp_path),
+            "--rules",
+            str(rules_path),
+            "--alphabet",
+            str(alphabet_path),
+            "--input",
+            str(input_path),
+            "--output",
+            str(output_path),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    output = json.loads(output_path.read_text(encoding="utf-8"))
+    assert output["inputs"] == [["aa", "b"]]
+
+
+def test_eval_cli_string_separator_mode(tmp_path: Path) -> None:
+    rules = {
+        "id": "rules",
+        "rules": [
+            {
+                "id": "identity_left",
+                "dir": "LEFT",
+                "inr": [],
+                "trm": [],
+                "cnd": [],
+                "out": "(proj INR *)",
+            }
+        ]
+    }
+    rules_path = tmp_path / "rules.json"
+    rules_path.write_text(json.dumps(rules), encoding="utf-8")
+    alphabet_path = tmp_path / "alphabet.csv"
+    alphabet_path.write_text(
+        ",a,aa,b\nVoice,+,-,0\n",
+        encoding="utf-8",
+    )
+    input_path = tmp_path / "input.toml"
+    input_path.write_text('inputs = ["a;a;b"]\n', encoding="utf-8")
+    output_path = tmp_path / "output.json"
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "eval",
+            str(tmp_path),
+            "--rules",
+            str(rules_path),
+            "--alphabet",
+            str(alphabet_path),
+            "--input",
+            str(input_path),
+            "--output",
+            str(output_path),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    output = json.loads(output_path.read_text(encoding="utf-8"))
+    assert output["inputs"] == [["a", "a", "b"]]
+
+
+def test_eval_cli_string_ambiguity_reports_options(tmp_path: Path) -> None:
+    rules = {
+        "id": "rules",
+        "rules": [
+            {
+                "id": "identity_left",
+                "dir": "LEFT",
+                "inr": [],
+                "trm": [],
+                "cnd": [],
+                "out": "(proj INR *)",
+            }
+        ]
+    }
+    rules_path = tmp_path / "rules.json"
+    rules_path.write_text(json.dumps(rules), encoding="utf-8")
+    alphabet_path = tmp_path / "alphabet.csv"
+    alphabet_path.write_text(
+        ",a,aa,b\nVoice,+,-,0\n",
+        encoding="utf-8",
+    )
+    input_path = tmp_path / "input.toml"
+    input_path.write_text('inputs = ["aab"]\n', encoding="utf-8")
+    output_path = tmp_path / "output.json"
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "eval",
+            str(tmp_path),
+            "--rules",
+            str(rules_path),
+            "--alphabet",
+            str(alphabet_path),
+            "--input",
+            str(input_path),
+            "--output",
+            str(output_path),
+        ],
+    )
+    assert result.exit_code != 0
+    assert "ambiguously tokenized" in result.output
+    assert "aa;b" in result.output
+    assert "a;a;b" in result.output
+
+
+def test_eval_cli_uses_tokenizer_separator_from_config(tmp_path: Path) -> None:
+    rules = {
+        "id": "rules",
+        "rules": [
+            {
+                "id": "identity_left",
+                "dir": "LEFT",
+                "inr": [],
+                "trm": [],
+                "cnd": [],
+                "out": "(proj INR *)",
+            }
+        ]
+    }
+    rules_path = tmp_path / "rules.json"
+    rules_path.write_text(json.dumps(rules), encoding="utf-8")
+    alphabet_path = tmp_path / "alphabet.csv"
+    alphabet_path.write_text(
+        ",a,b\nVoice,+,-\n",
+        encoding="utf-8",
+    )
+    input_path = tmp_path / "input.toml"
+    input_path.write_text('inputs = ["a|b"]\n', encoding="utf-8")
+    (tmp_path / "snc2fst.toml").write_text(
+        "[tokenizer]\n"
+        'separator = "|"\n',
+        encoding="utf-8",
+    )
+    output_path = tmp_path / "output.json"
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "eval",
+            str(tmp_path),
+            "--rules",
+            str(rules_path),
+            "--alphabet",
+            str(alphabet_path),
+            "--input",
+            str(input_path),
+            "--output",
+            str(output_path),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    output = json.loads(output_path.read_text(encoding="utf-8"))
+    assert output["inputs"] == [["a", "b"]]
+
+
 def test_eval_cli_non_strict_emits_bundle(tmp_path: Path) -> None:
     rules = {
         "id": "rules",

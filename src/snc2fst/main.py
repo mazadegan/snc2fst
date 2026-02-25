@@ -288,15 +288,20 @@ def _discover_rules_candidates(directory: Path) -> list[Path]:
 
 def _validate_input_segments_shape(payload: list[object]) -> None:
     for idx, word in enumerate(payload):
-        if not isinstance(word, list):
-            raise typer.BadParameter(
-                f"Word at index {idx} is not an array of symbols."
-            )
-        for sym in word:
-            if not isinstance(sym, str) or not sym.strip():
-                raise typer.BadParameter(
-                    f"Word {idx} contains a non-string symbol."
-                )
+        if isinstance(word, str):
+            if not word.strip():
+                raise typer.BadParameter(f"Word {idx} is empty.")
+            continue
+        if isinstance(word, list):
+            for sym in word:
+                if not isinstance(sym, str) or not sym.strip():
+                    raise typer.BadParameter(
+                        f"Word {idx} contains a non-string symbol."
+                    )
+            continue
+        raise typer.BadParameter(
+            f"Word at index {idx} must be a string or an array of symbols."
+        )
 
 
 def _discover_input_candidates(directory: Path) -> list[Path]:
@@ -362,6 +367,30 @@ def _load_project_paths(directory: Path) -> tuple[dict[str, Path], bool]:
             )
         result[key] = resolved
     return result, True
+
+
+def _load_project_tokenizer_separator(directory: Path) -> str:
+    config_path = directory / "snc2fst.toml"
+    if not config_path.exists():
+        return _DEFAULT_INPUT_TOKEN_SEPARATOR
+    payload = _load_toml(config_path)
+    if not isinstance(payload, dict):
+        raise typer.BadParameter(
+            "snc2fst.toml must be a TOML table/object."
+        )
+    tokenizer_obj = payload.get("tokenizer", {})
+    if tokenizer_obj is None:
+        tokenizer_obj = {}
+    if not isinstance(tokenizer_obj, dict):
+        raise typer.BadParameter(
+            "snc2fst.toml [tokenizer] must be a TOML table."
+        )
+    separator = tokenizer_obj.get("separator", _DEFAULT_INPUT_TOKEN_SEPARATOR)
+    if not isinstance(separator, str) or separator == "":
+        raise typer.BadParameter(
+            "snc2fst.toml tokenizer.separator must be a non-empty string."
+        )
+    return separator
 
 
 def _validate_configured_project_path(key: str, path: Path) -> None:
@@ -463,6 +492,161 @@ def _load_input_payload(path: Path) -> list[object]:
     raise typer.BadParameter("Input file must be a .json or .toml file.")
 
 
+_DEFAULT_INPUT_TOKEN_SEPARATOR = ";"
+_MAX_AMBIGUOUS_TOKENIZATIONS = 100
+
+
+def _build_symbol_trie(symbols: set[str]) -> dict[str, object]:
+    root: dict[str, object] = {}
+    for symbol in symbols:
+        node = root
+        for char in symbol:
+            next_node = node.get(char)
+            if not isinstance(next_node, dict):
+                next_node = {}
+                node[char] = next_node
+            node = next_node
+        node[""] = True
+    return root
+
+
+def _matching_symbols(
+    text: str,
+    start: int,
+    trie: dict[str, object],
+) -> list[tuple[int, str]]:
+    matches: list[tuple[int, str]] = []
+    node = trie
+    idx = start
+    while idx < len(text):
+        nxt = node.get(text[idx])
+        if not isinstance(nxt, dict):
+            break
+        node = nxt
+        idx += 1
+        if node.get("") is True:
+            matches.append((idx, text[start:idx]))
+    return matches
+
+
+def _tokenization_failure_index(text: str, trie: dict[str, object]) -> int:
+    idx = 0
+    while idx < len(text):
+        matches = _matching_symbols(text, idx, trie)
+        if not matches:
+            return idx
+        idx = matches[-1][0]
+    return len(text)
+
+
+def _enumerate_tokenizations(
+    text: str,
+    trie: dict[str, object],
+    max_paths: int,
+) -> list[list[str]]:
+    memo: dict[int, list[list[str]]] = {}
+    over_cap = False
+
+    def visit(start: int) -> list[list[str]]:
+        nonlocal over_cap
+        if start == len(text):
+            return [[]]
+        if start in memo:
+            return memo[start]
+        results: list[list[str]] = []
+        for end, symbol in _matching_symbols(text, start, trie):
+            tails = visit(end)
+            for tail in tails:
+                results.append([symbol] + tail)
+                if len(results) > max_paths:
+                    over_cap = True
+                    memo[start] = results[: max_paths + 1]
+                    return memo[start]
+        memo[start] = results
+        return results
+
+    all_paths = visit(0)
+    if over_cap and len(all_paths) > max_paths:
+        return all_paths[: max_paths + 1]
+    return all_paths
+
+
+def _tokenize_input_words(
+    payload: list[object],
+    symbols: set[str],
+    *,
+    separator: str = _DEFAULT_INPUT_TOKEN_SEPARATOR,
+) -> list[list[str]]:
+    trie = _build_symbol_trie(symbols)
+    tokenized: list[list[str]] = []
+    for idx, word in enumerate(payload):
+        if isinstance(word, list):
+            tokens: list[str] = []
+            for sym in word:
+                if not isinstance(sym, str) or not sym.strip():
+                    raise typer.BadParameter(
+                        f"Word {idx} contains a non-string symbol."
+                    )
+                token = sym.strip()
+                if token not in symbols:
+                    raise typer.BadParameter(
+                        f"Word {idx} has unknown symbol: {token!r}"
+                    )
+                tokens.append(token)
+            tokenized.append(tokens)
+            continue
+
+        if not isinstance(word, str):
+            raise typer.BadParameter(
+                f"Word at index {idx} must be a string or an array of symbols."
+            )
+        text = word.strip()
+        if not text:
+            raise typer.BadParameter(f"Word {idx} is empty.")
+
+        if separator in text:
+            pieces = [piece.strip() for piece in text.split(separator)]
+            if any(piece == "" for piece in pieces):
+                raise typer.BadParameter(
+                    f"Word {idx} has empty token in separator form: {word!r}"
+                )
+            unknown = [piece for piece in pieces if piece not in symbols]
+            if unknown:
+                raise typer.BadParameter(
+                    f"Word {idx} has unknown symbol in separator form: {unknown[0]!r}"
+                )
+            tokenized.append(pieces)
+            continue
+
+        paths = _enumerate_tokenizations(
+            text,
+            trie,
+            _MAX_AMBIGUOUS_TOKENIZATIONS,
+        )
+        if not paths:
+            fail_idx = _tokenization_failure_index(text, trie)
+            snippet = text[fail_idx : fail_idx + 10]
+            raise typer.BadParameter(
+                f"Word {idx} could not be tokenized at char {fail_idx}: {snippet!r}"
+            )
+        if len(paths) > 1:
+            rendered = [
+                separator.join(path)
+                for path in paths[:_MAX_AMBIGUOUS_TOKENIZATIONS]
+            ]
+            message = (
+                f"Word {idx} is ambiguously tokenized: {text!r}. "
+                f"Valid tokenizations ({len(rendered)} shown): "
+                + "; ".join(rendered)
+                + f". Use {separator} to disambiguate."
+            )
+            if len(paths) > _MAX_AMBIGUOUS_TOKENIZATIONS:
+                message += " (truncated)"
+            raise typer.BadParameter(message)
+        tokenized.append(paths[0])
+    return tokenized
+
+
 def _load_alphabet_features(alphabet_path: Path) -> set[str]:
     if alphabet_path.suffix.lower() not in {".csv", ".tsv", ".tab"}:
         raise typer.BadParameter("Alphabet must be a CSV/TSV feature table.")
@@ -547,20 +731,7 @@ def _validate_input_words(
     alphabet_data = _load_alphabet(alphabet_path)
     symbols = {row.symbol for row in alphabet_data.rows}
     payload = _load_input_payload(input_path)
-    for idx, word in enumerate(payload):
-        if not isinstance(word, list):
-            raise typer.BadParameter(
-                f"Word at index {idx} is not an array of symbols."
-            )
-        for sym in word:
-            if not isinstance(sym, str) or not sym.strip():
-                raise typer.BadParameter(
-                    f"Word {idx} contains a non-string symbol."
-                )
-            if sym not in symbols:
-                raise typer.BadParameter(
-                    f"Word {idx} has unknown symbol: {sym!r}"
-                )
+    _tokenize_input_words(payload, symbols)
 
 
 def _select_rule(rules: list[Rule], rule_id: str | None) -> Rule:
@@ -1020,6 +1191,7 @@ def eval_rule(
     """
     if not target.is_dir():
         raise typer.BadParameter("TARGET must be a directory.")
+    tokenizer_separator = _load_project_tokenizer_separator(target.resolve())
     _require_all_overrides(
         command_name="eval",
         overrides={
@@ -1092,7 +1264,7 @@ def eval_rule(
         selected_rules = [_select_rule(rules_list, rule_id)]
     else:
         selected_rules = list(rules_list)
-    segments = _load_input_payload(input_words_path)
+    segments_payload = _load_input_payload(input_words_path)
 
     symbol_to_bundle: dict[str, dict[str, str]] = {}
     bundle_to_symbol: dict[tuple[str, ...], str] = {}
@@ -1104,6 +1276,12 @@ def eval_rule(
                 f"Alphabet has multiple symbols for bundle: {bundle_key}"
             )
         bundle_to_symbol[bundle_key] = row.symbol
+
+    segments = _tokenize_input_words(
+        segments_payload,
+        set(symbol_to_bundle.keys()),
+        separator=tokenizer_separator,
+    )
 
     if compare:
         pynini = True
@@ -1352,6 +1530,9 @@ def init_samples(
         'alphabet = "alphabet.csv"\n'
         'rules = "rules.toml"\n'
         'input = "input.toml"\n'
+        "\n"
+        "[tokenizer]\n"
+        f'separator = "{_DEFAULT_INPUT_TOKEN_SEPARATOR}"\n'
     )
     config_path.write_text(config_text, encoding="utf-8")
     base = Path.cwd().resolve()
