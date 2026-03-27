@@ -1,25 +1,39 @@
+import re
 from pydantic import BaseModel, field_validator
 from typing import Literal
+from snc2fst.types import FeatureSpecSequence
+
+FEATURE_PATTERN = re.compile(r'^([+\-])(\w+)$')
 
 class Rule(BaseModel):
     Id: str
-    Inr: list[str] 
-    Trm: list[str]
+    Inr: list[list[str]] 
+    Trm: list[list[str]]
     Dir: Literal["L", "R"] 
     Out: str
 
     @field_validator('Inr', 'Trm')
     @classmethod
-    def parse_natural_classes(cls, v: list[str]) -> list[list[tuple[str, str]]]:
+    def parse_natural_classes(cls, v: list[list[str]]) -> FeatureSpecSequence:
         """
-        Converts ['+Syllabic', '-Sonorant'] into [('+', 'Syllabic'), ('-', 'Sonorant')]
+        Validates and converts [['+F1'], ['+F1', '-F2']] 
+        into [[('+', 'F1')], [('+', 'F1'), ('-', 'F2')]]
         """
-        parsed_classes = []
-        for feature_string in v:
-            sign = feature_string[0]
-            feature = feature_string[1:]
-            parsed_classes.append([(sign, feature)])
-        return parsed_classes
+        parsed_sequence = []
+        for feature_spec in v:
+            parsed_class = []
+            for feature_str in feature_spec:
+                match = FEATURE_PATTERN.match(feature_str.strip())
+                if not match:
+                    raise ValueError(
+                        f"Invalid feature syntax: '{feature_str}'. "
+                        f"Features must begin with '+' or '-', followed by the feature name. "
+                        f"(Expected pattern: {FEATURE_PATTERN.pattern})"
+                    )
+                sign, feature_name = match.groups()
+                parsed_class.append((sign, feature_name))
+            parsed_sequence.append(parsed_class)
+        return parsed_sequence
 
 class GrammarConfig(BaseModel):
     alphabet_path: str
