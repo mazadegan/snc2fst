@@ -59,21 +59,6 @@ def init(filename):
     click.echo(f"  - {tests_path.name}")
 
 
-@main.command()
-@click.argument("config_file", type=click.Path(exists=True, dir_okay=False))
-@click.option(
-    "--output",
-    "-o",
-    default="out.fst",
-    type=click.Path(),
-    help="Output path for the compiled OpenFST transducer.",
-)
-def compile(config_file, output):
-    """Compile a grammar configuration to an FST."""
-    config = _load_config(config_file)
-    click.echo(f"Loading alphabet from: {config.alphabet_path}")
-    click.echo(f"First rule direction: {config.rules[0].Dir}")
-
 
 @main.command()
 @click.argument("config_file", type=click.Path(exists=True, dir_okay=False))
