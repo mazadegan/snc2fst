@@ -6,4 +6,4 @@ Id = "R_0"
 Inr = [["-F2"]]
 Trm = [["+F1"]]
 Dir = "L"
-Out = "(:unify INR (+F1))"
+Out = "(concat (unify (nth 1 INR) [+F1]))"

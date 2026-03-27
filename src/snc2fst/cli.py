@@ -7,6 +7,7 @@ import tomllib
 from pydantic import ValidationError
 from snc2fst.models import GrammarConfig
 from snc2fst.io import Alphabet, load_tests
+from snc2fst import dsl
 
 
 def _load_config(config_file) -> GrammarConfig:
@@ -121,6 +122,30 @@ def validate(config_file):
             click.echo(f"      - {err}", err=True)
         raise click.Abort()
     click.echo("  [✓] All rule features match the alphabet matrix.")
+
+    out_errors = []
+    valid_segments = set(alphabet.segments)
+    for rule in config.rules:
+        try:
+            out_ast = dsl.parse(rule.Out)
+        except dsl.ParseError as e:
+            out_errors.append(f"Rule '{rule.Id}': invalid Out expression — {e}")
+            continue
+        out_errors.extend(dsl.collect_errors(
+            out_ast,
+            rule_id=rule.Id,
+            inr_len=len(rule.Inr),
+            trm_len=len(rule.Trm),
+            valid_segments=valid_segments,
+            valid_features=valid_features,
+        ))
+
+    if out_errors:
+        click.echo("  [x] Out expression validation failed:", err=True)
+        for err in out_errors:
+            click.echo(f"      - {err}", err=True)
+        raise click.Abort()
+    click.echo("  [✓] All Out expressions are valid.")
 
     tests_path = base_dir / config.tests_path
     try:
