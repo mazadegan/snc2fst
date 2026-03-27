@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "snc2fst"
 version = "1.0.0"
@@ -6,10 +10,8 @@ readme = "README.md"
 license = { text = "Apache-2.0" }
 requires-python = ">=3.12"
 dependencies = [
-    "pydantic>=2.7.0",
-    "questionary>=2.0.1",
-    "tqdm>=4.66.0",
-    "typer>=0.12.0",
+    "click>=8.0.0",
+    "pydantic>=2.0.0",
 ]
 
 [project.optional-dependencies]
@@ -17,25 +19,13 @@ dev = [
     "black>=24.0.0",
     "pytest>=8.0.0",
 ]
-docs = [
-    "sphinx>=7.0.0",
-    "sphinx-click>=5.0.0",
-    "pallets-sphinx-themes>=2.1.1",
-]
+
+[project.scripts]
+snc2fst = "snc2fst.cli:main"
+snc = "snc2fst.cli:main"
 
 [tool.black]
 line-length = 79
 
-[tool.pytest.ini_options]
-markers = [
-    "smoke: quick end-to-end CLI smoke test",
-]
-
-[project.scripts]
-snc2fst = "snc2fst.main:app"
-
-[tool.setuptools]
-package-dir = {"" = "src"}
-
-[tool.setuptools.packages.find]
-where = ["src"]
+[tool.setuptools.package-data]
+"snc2fst" = ["templates/*.toml", "templates/*.csv", "templates/*.tsv"]

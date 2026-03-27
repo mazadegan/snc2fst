@@ -1,0 +1,9 @@
+alphabet_path = "alphabet.csv"
+tests_path = "tests.tsv"
+
+[[rules]]
+Id = "R_0"
+Inr = ["-F2"]
+Trm = ["+F1"]
+Dir = "L"
+Out = "(:unify INR (+F1))"
