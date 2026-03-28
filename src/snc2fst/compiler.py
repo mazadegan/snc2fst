@@ -11,6 +11,7 @@ pynini.reverse(T), which correctly implements w → reverse(T(reverse(w))).
 from __future__ import annotations
 
 from collections import deque
+from itertools import product as iproduct
 
 import pynini
 
@@ -42,6 +43,136 @@ def _check_compilable(rule: Rule) -> None:
         f"Rule '{rule.Id}': (n={n}, m={m}) is not compilable. "
         "Only (n≥1, m=0) and (n=1, m=1) are supported."
     )
+
+
+# ---------------------------------------------------------------------------
+# Alphabet propagation
+# ---------------------------------------------------------------------------
+
+def _seg_key(seg: Segment) -> frozenset:
+    return frozenset(seg.items())
+
+
+def _auto_name(seg: Segment) -> str:
+    """Canonical name for a segment not in the named alphabet."""
+    parts = sorted(f"{v}{f}" for f, v in seg.items())
+    return "[" + " ".join(parts) + "]"
+
+
+def _expand_alphabet(
+    base: dict[str, Segment],
+    new_segs: list[Segment],
+) -> dict[str, Segment]:
+    """Return a copy of base extended with any segments in new_segs not already present."""
+    result = dict(base)
+    rev = {_seg_key(seg): name for name, seg in base.items()}
+    for seg in new_segs:
+        key = _seg_key(seg)
+        if key not in rev:
+            name = _auto_name(seg)
+            result[name] = dict(seg)
+            rev[key] = name
+    return result
+
+
+def _rule_output_segs(
+    rule: Rule,
+    out_ast,
+    alphabet: dict[str, Segment],
+) -> list[Segment]:
+    """Enumerate every segment Out can produce for the given rule and alphabet."""
+    dir_r = rule.Dir == "R"
+    n, m = len(rule.Inr), len(rule.Trm)
+    seg_list = list(alphabet.values())
+    produced: list[Segment] = []
+
+    if m == 0:
+        for combo in iproduct(seg_list, repeat=n):
+            check = list(reversed(combo)) if dir_r else list(combo)
+            if operations.models(check, rule.Inr):
+                raw = evaluate(out_ast, check, [], alphabet)
+                produced += [raw] if isinstance(raw, dict) else list(raw)
+    else:  # n=1, m=1
+        inr_segs = [s for s in seg_list if operations.models([s], rule.Inr)]
+        trm_segs = [s for s in seg_list if operations.models([s], rule.Trm)]
+        for x_seg in inr_segs:
+            for sigma_seg in trm_segs:
+                raw = evaluate(out_ast, [x_seg], [sigma_seg], alphabet)
+                produced += [raw] if isinstance(raw, dict) else list(raw)
+
+    return produced
+
+
+def compute_alphabets(
+    rules: list[Rule],
+    base_alphabet: dict[str, Segment],
+) -> list[dict[str, Segment]]:
+    """Return the effective input alphabet for each rule.
+
+    alphabets[i] is the alphabet rule i reads from — equal to base_alphabet
+    for i=0, and the output alphabet of rule i-1 for i>0.  Any segment
+    produced by Out that is not already named receives an auto-generated name
+    based on its feature bundle (e.g. ``[-lab +nas -voc]``).
+    """
+    alphabets: list[dict[str, Segment]] = []
+    current = base_alphabet
+    for rule in rules:
+        alphabets.append(current)
+        out_ast = dsl.parse(rule.Out)
+        new_segs = _rule_output_segs(rule, out_ast, current)
+        current = _expand_alphabet(current, new_segs)
+    return alphabets
+
+
+# ---------------------------------------------------------------------------
+# Arc count prediction
+# ---------------------------------------------------------------------------
+
+def predict_arcs(
+    rule: Rule,
+    alphabet: dict[str, Segment],
+    out_ast,
+) -> int:
+    """Return the exact number of FST arcs the rule will produce before optimization.
+
+    For n=1, m=1:
+        base = |Σ| × (1 + |L(Trm)|)
+        extra = Σ_{x ∈ L(Inr), σ ∈ L(Trm)} max(0, |Out(x,σ)| − 1)
+
+    For n≥1, m=0:
+        S    = 1 + |Σ| + ... + |Σ|^(n−1)   (total buffer states)
+        base = (|Σ| + 1) × S − 1
+        extra = Σ_{matching (buf+(x,))} max(0, |Out(buf_check)| − 1)
+    """
+    _check_compilable(rule)
+    dir_r = rule.Dir == "R"
+    n, m = len(rule.Inr), len(rule.Trm)
+    sigma = len(alphabet)
+    seg_list = list(alphabet.values())
+
+    if m == 1:  # n=1, m=1
+        trm_segs = [s for s in seg_list if operations.models([s], rule.Trm)]
+        inr_segs = [s for s in seg_list if operations.models([s], rule.Inr)]
+        base = sigma * (1 + len(trm_segs))
+        extra = 0
+        for x_seg in inr_segs:
+            for sigma_seg in trm_segs:
+                raw = evaluate(out_ast, [x_seg], [sigma_seg], alphabet)
+                k = 1 if isinstance(raw, dict) else len(list(raw))
+                extra += max(0, k - 1)
+        return base + extra
+
+    else:  # m=0, n>=1
+        s_total = sum(sigma ** k for k in range(n))
+        base = (sigma + 1) * s_total - 1
+        extra = 0
+        for combo in iproduct(seg_list, repeat=n):
+            check = list(reversed(combo)) if dir_r else list(combo)
+            if operations.models(check, rule.Inr):
+                raw = evaluate(out_ast, check, [], alphabet)
+                k = 1 if isinstance(raw, dict) else len(list(raw))
+                extra += max(0, k - 1)
+        return base + extra
 
 
 # ---------------------------------------------------------------------------
@@ -253,6 +384,9 @@ def compile_rule(rule: Rule, alphabet: dict[str, Segment]) -> pynini.Fst:
     encodes right-to-left semantics internally (reversed pattern checks,
     reversed output), so callers must feed the reversed input string and
     then reverse the output string to obtain the correct surface form.
+
+    Pass the alphabet returned by ``compute_alphabets`` for this rule's
+    position in the rule chain, not necessarily the base alphabet.
     """
     _check_compilable(rule)
     out_ast = dsl.parse(rule.Out)

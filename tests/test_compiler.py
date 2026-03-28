@@ -384,6 +384,126 @@ def test_epenthesis_greedy():
 
 
 # ---------------------------------------------------------------------------
+# Multi-rule sequential application
+# ---------------------------------------------------------------------------
+
+def _apply_chain(rules: list[Rule], inp: list[str]) -> list[str]:
+    """Apply a sequence of rules via their FSTs, one at a time.
+
+    For Dir=R rules, feed reversed input to the left-to-right FST and
+    reverse the output, matching the semantics of compile_rule for Dir=R.
+    """
+    from snc2fst.compiler import compute_alphabets
+    alphabets = compute_alphabets(rules, ALPHABET)
+    current = inp
+    for rule, alphabet in zip(rules, alphabets):
+        fst = compile_rule(rule, alphabet)
+        if rule.Dir == "R":
+            got = list(reversed(_transduce(fst, list(reversed(current)))))
+        else:
+            got = _transduce(fst, current)
+        current = got
+    return current
+
+
+def _ref_chain(rules: list[Rule], inp: list[str]) -> list[str]:
+    """Apply a sequence of rules via the reference evaluator."""
+    current = [dict(ALPHABET[s]) for s in inp]
+    for rule in rules:
+        out_ast = dsl.parse(rule.Out)
+        current = apply_rule(rule, out_ast, current, ALPHABET)
+    return [_REV[frozenset(seg.items())] for seg in current]
+
+
+def _assert_chain(rules: list[Rule], inputs: list[list[str]]) -> None:
+    for inp in inputs:
+        ref = _ref_chain(rules, inp)
+        got = _apply_chain(rules, inp)
+        assert got == ref, (
+            f"Chain mismatch on {inp!r}: FST={got!r}, ref={ref!r}"
+        )
+
+
+# Dir=L then Dir=L: nasalize vowels before nasals, then labielize nasals
+# Rule 1: [+voc] → [+nas] / __ [+nas]  (Dir=L)
+# Rule 2: [+nas] → [+lab] / __ [+lab]  (Dir=L, unconditional labialization of nasals)
+_CHAIN_LL = [
+    Rule(Id="r1", Inr=[["+voc"]], Trm=[["+nas"]], Dir="L",
+         Out="(unify (nth 1 INR) [+nas])"),
+    Rule(Id="r2", Inr=[["+nas"]], Trm=[], Dir="L",
+         Out="(unify (nth 1 INR) [+lab])"),
+]
+
+
+def test_chain_ll_basic():
+    # a m → nasalized-a m → nasalized-a m-with-lab (m already +lab)
+    _assert_chain(_CHAIN_LL, [_segs("a m"), _segs("a n"), _segs("b a m")])
+
+
+def test_chain_ll_no_trigger():
+    _assert_chain(_CHAIN_LL, [_segs("a b p"), _segs("p a b")])
+
+
+def test_chain_ll_feed():
+    # r1 nasalizes 'a' before 'n'; r2 then labializes that nasalized-a
+    # (nasalized-a has +nas so r2 fires on it)
+    _assert_chain(_CHAIN_LL, [_segs("a n b"), _segs("b a n")])
+
+
+# Dir=R then Dir=R: two right-to-left rules in sequence
+_CHAIN_RR = [
+    Rule(Id="r1", Inr=[["+voc"]], Trm=[["+nas"]], Dir="R",
+         Out="(unify (nth 1 INR) [+nas])"),
+    Rule(Id="r2", Inr=[["+nas"]], Trm=[], Dir="R",
+         Out="(unify (nth 1 INR) [+lab])"),
+]
+
+
+def test_chain_rr_basic():
+    _assert_chain(_CHAIN_RR, [_segs("m a"), _segs("n a b"), _segs("m a n")])
+
+
+def test_chain_rr_no_trigger():
+    _assert_chain(_CHAIN_RR, [_segs("a b p"), []])
+
+
+# Dir=L then Dir=R: nasalize before nasal (L), then metathesis right-to-left (R)
+_CHAIN_LR = [
+    Rule(Id="r1", Inr=[["+voc"]], Trm=[["+nas"]], Dir="L",
+         Out="(unify (nth 1 INR) [+nas])"),
+    Rule(Id="r2", Inr=[["+lab", "-voc"], ["-lab", "-voc"]], Trm=[], Dir="R",
+         Out="(concat (nth 2 INR) (nth 1 INR))"),
+]
+
+
+def test_chain_lr_no_interaction():
+    # No segment is both a vowel-before-nasal and a metathesis target
+    _assert_chain(_CHAIN_LR, [_segs("a m b n"), _segs("b n p")])
+
+
+def test_chain_lr_sequential():
+    # r1 fires on 'a' before 'm', r2 sees the result and may metathesise
+    _assert_chain(_CHAIN_LR, [_segs("b n a m"), _segs("a m b n p")])
+
+
+# Dir=R then Dir=L: metathesis right-to-left, then nasalize before nasal (L)
+_CHAIN_RL = [
+    Rule(Id="r1", Inr=[["+lab", "-voc"], ["-lab", "-voc"]], Trm=[], Dir="R",
+         Out="(concat (nth 2 INR) (nth 1 INR))"),
+    Rule(Id="r2", Inr=[["+voc"]], Trm=[["+nas"]], Dir="L",
+         Out="(unify (nth 1 INR) [+nas])"),
+]
+
+
+def test_chain_rl_no_interaction():
+    _assert_chain(_CHAIN_RL, [_segs("b n a p"), _segs("a m p")])
+
+
+def test_chain_rl_sequential():
+    _assert_chain(_CHAIN_RL, [_segs("b n a m"), _segs("a b n m")])
+
+
+# ---------------------------------------------------------------------------
 # CompileError for unsupported (n, m) pairs
 # ---------------------------------------------------------------------------
 

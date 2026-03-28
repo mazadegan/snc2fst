@@ -1,9 +1,11 @@
+import traceback
 import click
 import importlib.resources
 import itertools
 from pathlib import Path
 
 import tomllib
+import pynini
 from pydantic import ValidationError
 from snc2fst.models import GrammarConfig
 from snc2fst.alphabet import TokenizeError, load_alphabet, tokenize, word_to_str
@@ -11,6 +13,7 @@ from snc2fst.io import load_tests
 from snc2fst import dsl
 from snc2fst.evaluator import EvalError, apply_rule
 from snc2fst.table import build_table, format_latex, format_txt
+from snc2fst.compiler import CompileError, compile_rule, compute_alphabets, predict_arcs
 
 
 def _load_config(config_file) -> GrammarConfig:
@@ -281,6 +284,157 @@ def eval_cmd(config_file, fmt, output):
 
     if fmt is None or errors:
         click.echo(f"\n{passed}/{total} passed, {failed} failed, {errors} errors.")
+
+
+_DEFAULT_MAX_ARCS = 1_000_000
+
+
+def _write_syms(sym: pynini.SymbolTable, path: Path) -> None:
+    sym.write_text(str(path))
+
+
+def _write_att(fst: pynini.Fst, path: Path) -> None:
+    isym = fst.input_symbols()
+    osym = fst.output_symbols()
+    lines = []
+    for state in fst.states():
+        for arc in fst.arcs(state):
+            isym_str = isym.find(arc.ilabel) if arc.ilabel != 0 else "<eps>"
+            osym_str = osym.find(arc.olabel) if arc.olabel != 0 else "<eps>"
+            lines.append(f"{state}\t{arc.nextstate}\t{isym_str}\t{osym_str}\t{arc.weight}")
+        final_w = fst.final(state)
+        if final_w != pynini.Weight.zero("tropical"):
+            lines.append(f"{state}\t{final_w}")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+@main.command(name="compile")
+@click.argument("config_file", type=click.Path(exists=True, dir_okay=False))
+@click.option(
+    "--output", "-o",
+    default=None,
+    help="Base output path (no extension). Defaults to <config_dir>/grammar.",
+)
+@click.option(
+    "--format", "fmt",
+    type=click.Choice(["fst", "att"]),
+    default="fst",
+    show_default=True,
+    help="Output format. 'fst' writes an OpenFST binary + .syms; "
+         "'att' writes an AT&T text file + .syms.",
+)
+@click.option(
+    "--max-arcs",
+    default=_DEFAULT_MAX_ARCS,
+    show_default=True,
+    type=int,
+    help="Abort if any single rule FST exceeds this many arcs before optimization.",
+)
+@click.option(
+    "--no-optimize",
+    is_flag=True,
+    default=False,
+    help="Skip rmepsilon / determinize / minimize after compilation.",
+)
+@click.option(
+    "--verbose", "-v",
+    is_flag=True,
+    default=False,
+    help="Print full tracebacks on error.",
+)
+def compile_cmd(config_file, output, fmt, max_arcs, no_optimize, verbose):
+    """Compile all grammar rules to a single composed FST transducer."""
+    config_path = Path(config_file)
+    base_dir = config_path.parent
+    out_base = Path(output) if output else base_dir / "grammar"
+
+    def die(msg: str, exc: BaseException | None = None) -> None:
+        click.echo(f"[x] {msg}", err=True)
+        if verbose and exc is not None:
+            click.echo(traceback.format_exc(), err=True)
+        raise click.Abort()
+
+    # Load config
+    try:
+        config = _load_config(config_path)
+    except Exception as e:
+        die(f"Failed to load config: {e}", e)
+
+    # Load alphabet
+    try:
+        base_alphabet = load_alphabet(base_dir / config.alphabet_path)
+    except FileNotFoundError as e:
+        die(f"Missing alphabet file: {base_dir / config.alphabet_path}", e)
+    except Exception as e:
+        die(f"Failed to read alphabet: {e}", e)
+
+    if not config.rules:
+        die("No rules defined in config.")
+
+    # Propagate alphabets through the rule chain
+    try:
+        alphabets = compute_alphabets(config.rules, base_alphabet)
+    except Exception as e:
+        die(f"Failed to compute rule alphabets: {e}", e)
+
+    # Check compilability and predict arc counts before allocating any FSTs
+    for rule, alphabet in zip(config.rules, alphabets):
+        try:
+            out_ast = dsl.parse(rule.Out)
+            arc_count = predict_arcs(rule, alphabet, out_ast)
+        except CompileError as e:
+            die(f"Rule '{rule.Id}': {e}", e)
+        except Exception as e:
+            die(f"Rule '{rule.Id}': failed to predict arc count: {e}", e)
+
+        if arc_count > max_arcs:
+            die(
+                f"Rule '{rule.Id}' would produce {arc_count:,} arcs "
+                f"(limit {max_arcs:,}). Use --max-arcs to raise the limit."
+            )
+        click.echo(f"  {rule.Id}: {arc_count:,} arcs")
+
+    # Compile each rule with its effective input alphabet
+    fsts: list[pynini.Fst] = []
+    for rule, alphabet in zip(config.rules, alphabets):
+        click.echo(f"  Compiling {rule.Id} ...")
+        try:
+            fst = compile_rule(rule, alphabet)
+        except CompileError as e:
+            die(f"Rule '{rule.Id}': {e}", e)
+        except Exception as e:
+            die(f"Rule '{rule.Id}': unexpected error during compilation: {e}", e)
+
+        if not no_optimize:
+            try:
+                pynini.optimize(fst)
+            except Exception as e:
+                die(f"Rule '{rule.Id}': optimization failed: {e}", e)
+
+        fsts.append(fst)
+
+    # Write one FST per rule
+    for rule, fst in zip(config.rules, fsts):
+        sym = fst.input_symbols()
+        stem = f"{out_base}_{rule.Id}"
+        sym_path = Path(stem).with_suffix(".syms")
+        try:
+            _write_syms(sym, sym_path)
+        except Exception as e:
+            die(f"Rule '{rule.Id}': failed to write symbol table: {e}", e)
+
+        try:
+            total_arcs = sum(1 for s in fst.states() for _ in fst.arcs(s))
+            if fmt == "fst":
+                fst_path = Path(stem).with_suffix(".fst")
+                fst.write(str(fst_path))
+                click.echo(f"  {rule.Id}: {fst.num_states():,} states, {total_arcs:,} arcs → {fst_path.name}")
+            else:
+                att_path = Path(stem).with_suffix(".att")
+                _write_att(fst, att_path)
+                click.echo(f"  {rule.Id}: {fst.num_states():,} states, {total_arcs:,} arcs → {att_path.name}")
+        except Exception as e:
+            die(f"Rule '{rule.Id}': failed to write FST: {e}", e)
 
 
 if __name__ == "__main__":
