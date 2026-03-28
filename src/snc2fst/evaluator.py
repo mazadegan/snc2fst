@@ -112,7 +112,8 @@ def apply_rule(
             i += 1
             continue
 
-        out: Word = evaluate(out_ast, target, trigger, alphabet)  # type: ignore[assignment]
+        raw = evaluate(out_ast, target, trigger, alphabet)
+        out: Word = [raw] if isinstance(raw, dict) else list(raw)  # type: ignore[arg-type]
         result[i : i + m] = out
         i += len(out)
 
