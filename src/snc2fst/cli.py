@@ -10,6 +10,7 @@ from snc2fst.alphabet import TokenizeError, load_alphabet, tokenize, word_to_str
 from snc2fst.io import load_tests
 from snc2fst import dsl
 from snc2fst.evaluator import EvalError, apply_rule
+from snc2fst.table import build_table, format_latex, format_txt
 
 
 def _load_config(config_file) -> GrammarConfig:
@@ -179,7 +180,19 @@ def validate(config_file):
 
 @main.command(name="eval")
 @click.argument("config_file", type=click.Path(exists=True, dir_okay=False))
-def eval_cmd(config_file):
+@click.option(
+    "--format", "fmt",
+    type=click.Choice(["txt", "latex"]),
+    default=None,
+    help="Render results as a table in the given format instead of per-test lines.",
+)
+@click.option(
+    "--output", "-o",
+    type=click.Path(dir_okay=False),
+    default=None,
+    help="Write output to a file instead of stdout.",
+)
+def eval_cmd(config_file, fmt, output):
     """Apply grammar rules to all test cases and report results."""
     config_path = Path(config_file)
     base_dir = config_path.parent
@@ -212,39 +225,62 @@ def eval_cmd(config_file):
         click.echo(f"[x] Failed to parse Out expression: {e}", err=True)
         raise click.Abort()
 
+    # Run every test case, collecting per-rule intermediate states.
+    rule_ids = [rule.Id for rule in config.rules]
     passed = failed = errors = 0
+    good_inputs: list[str] = []
+    good_states: list[list] = []   # per-test list of word states (one per rule boundary)
+    good_expected: list[list[str]] = []
+
     for i, (inp_str, exp_str) in enumerate(tests, 1):
         try:
             inp_tokens = tokenize(inp_str, alphabet)
             exp_tokens = tokenize(exp_str, alphabet)
         except TokenizeError as e:
-            click.echo(f"  [{i}] ERROR  {inp_str}: {e}")
+            click.echo(f"  [{i}] ERROR  {inp_str}: {e}", err=True)
             errors += 1
             continue
 
         word = [dict(alphabet[t]) for t in inp_tokens]
+        states = [list(word)]
         try:
             for rule in config.rules:
                 word = apply_rule(rule, out_asts[rule.Id], word, alphabet)
+                states.append(list(word))
         except EvalError as e:
-            click.echo(f"  [{i}] ERROR  {inp_str}: {e}")
+            click.echo(f"  [{i}] ERROR  {inp_str}: {e}", err=True)
             errors += 1
             continue
 
         out_tokens = tokenize(word_to_str(word, alphabet), alphabet)
         ok = out_tokens == exp_tokens
-        if ok:
-            passed += 1
-            click.echo(f"  [{i}] PASS  {inp_str} → {word_to_str(word, alphabet)}")
-        else:
-            failed += 1
-            click.echo(
-                f"  [{i}] FAIL  {inp_str} → {word_to_str(word, alphabet)}"
-                f"  (expected {exp_str})"
-            )
+        passed += ok
+        failed += not ok
+
+        good_inputs.append(inp_str)
+        good_states.append(states)
+        good_expected.append(exp_tokens)
+
+        if fmt is None:
+            result = word_to_str(word, alphabet)
+            if ok:
+                click.echo(f"  [{i}] PASS  {inp_str} → {result}")
+            else:
+                click.echo(f"  [{i}] FAIL  {inp_str} → {result}  (expected {exp_str})")
 
     total = len(tests)
-    click.echo(f"\n{passed}/{total} passed, {failed} failed, {errors} errors.")
+
+    if fmt is not None:
+        table = build_table(good_inputs, rule_ids, good_states, alphabet)
+        rendered = format_latex(table) if fmt == "latex" else format_txt(table)
+        if output:
+            Path(output).write_text(rendered + "\n", encoding="utf-8")
+            click.echo(f"Table written to {output}")
+        else:
+            click.echo(rendered)
+
+    if fmt is None or errors:
+        click.echo(f"\n{passed}/{total} passed, {failed} failed, {errors} errors.")
 
 
 if __name__ == "__main__":
