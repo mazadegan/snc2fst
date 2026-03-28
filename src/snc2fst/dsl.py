@@ -134,7 +134,11 @@ class _Parser:
                 return ast.If(cond=args[0], then=args[1], else_=args[2])
             case "unify":
                 check_argc(2)
-                check_type(1, ast.FeatureSpec, "a feature spec e.g. [+F -G]")
+                if isinstance(args[1], (ast.FeatureNames, ast.NcSequence)):
+                    raise ParseError(
+                        f"'unify': argument 2 must be a feature spec e.g. [+F -G]"
+                        f" or a segment expression"
+                    )
                 return ast.Unify(segment=args[0], features=args[1])
             case "subtract":
                 check_argc(2)
@@ -246,7 +250,13 @@ def collect_errors(
                     errors.append(
                         f"Rule '{rule_id}': undefined segment symbol '{name}'."
                     )
-            case ast.Unify(segment=seg, features=fs) | ast.Subtract(segment=seg, features=fs):
+            case ast.Unify(segment=seg, features=fs):
+                if isinstance(fs, ast.FeatureSpec):
+                    check_features(fs.features)
+                else:
+                    walk(fs)
+                walk(seg)
+            case ast.Subtract(segment=seg, features=fs):
                 check_features(fs.features)
                 walk(seg)
             case ast.Project(segment=seg, names=fn):

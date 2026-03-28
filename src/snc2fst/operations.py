@@ -19,7 +19,7 @@ def unify(seg: Segment, valued_features: FeatureSpec) -> Segment:
 
 def project(seg: Segment, names: list[Feature]) -> Segment:
     """π_F(s) = s ∩ ({-,+} × F)"""
-    return {f: v for f, v in seg.items() if f in names}
+    return {f: v for f, v in seg.items() if f in names and v in ("+", "-")}
 
 
 def in_class(seg: Segment, spec: FeatureSpec) -> bool:

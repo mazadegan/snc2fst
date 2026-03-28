@@ -1,0 +1,26 @@
+alphabet_path = "alphabet.csv"
+tests_path = "tests.tsv"
+
+# R1: copy Back from the nearest preceding non-high vowel
+[[rules]]
+Id = "R1"
+Dir = "L"
+Inr = [["+Syllabic"]]
+Trm = [["+Syllabic", "-High"]]
+Out = "(unify (nth 1 INR) (project (nth 1 TRM) [Back]))"
+
+# R2: copy Back from the nearest preceding high round vowel
+[[rules]]
+Id = "R2"
+Dir = "L"
+Inr = [["+Syllabic"]]
+Trm = [["+Syllabic", "+High", "+Round"]]
+Out = "(unify (nth 1 INR) (project (nth 1 TRM) [Back]))"
+
+# R3: default — assign -Back when no harmony trigger is found
+[[rules]]
+Id = "R3"
+Dir = "L"
+Inr = [["+Syllabic"]]
+Trm = [[]]
+Out = "(unify (nth 1 INR) [-Back])"

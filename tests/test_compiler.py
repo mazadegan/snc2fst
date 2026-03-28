@@ -22,7 +22,7 @@ Natural classes used in tests:
 """
 
 import pytest
-import pynini
+pynini = pytest.importorskip("pynini", reason="pynini not installed")
 
 from snc2fst.compiler import CompileError, compile_rule
 from snc2fst.evaluator import apply_rule
@@ -45,7 +45,7 @@ ALPHABET = {
 # Transduction helpers
 # ---------------------------------------------------------------------------
 
-def _transduce(fst: pynini.Fst, seg_names: list[str]) -> list[str]:
+def _transduce(fst: "pynini.Fst", seg_names: list[str]) -> list[str]:
     """Run the FST on a list of segment names; return output as list of names."""
     sym = fst.input_symbols()
     output_sym = fst.output_symbols()

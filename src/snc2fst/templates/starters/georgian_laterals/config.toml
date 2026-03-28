@@ -1,0 +1,13 @@
+alphabet_path = "alphabet.csv"
+tests_path = "tests.tsv"
+
+[[rules]]
+Id = "R1"
+Dir = "R"
+Inr = [["+Lateral", "+Dorsal"]]
+Trm = [[]]
+Out = """
+  (if (in? (nth 1 TRM) [-Back])
+    (unify (subtract (nth 1 INR) [+Dorsal]) [-Dorsal])
+    INR)
+"""

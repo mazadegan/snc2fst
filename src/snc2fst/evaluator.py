@@ -39,7 +39,12 @@ def evaluate(
             return {name: sign for sign, name in _to_spec(fs)}
         case ast.Unify(segment=seg_node, features=fs):
             seg = evaluate(seg_node, inr, trm, alphabet)
-            return operations.unify(seg, _to_spec(fs))
+            if isinstance(fs, ast.FeatureSpec):
+                spec = _to_spec(fs)
+            else:
+                other = evaluate(fs, inr, trm, alphabet)
+                spec = [(v, f) for f, v in other.items()]
+            return operations.unify(seg, spec)
         case ast.Subtract(segment=seg_node, features=fs):
             seg = evaluate(seg_node, inr, trm, alphabet)
             return operations.subtract(seg, _to_spec(fs))
@@ -70,6 +75,34 @@ def evaluate(
             raise EvalError(f"Cannot evaluate node: {node!r}")
 
 
+def _find_trigger(
+    word: Word,
+    trm: list,
+    anchor: int,
+    rightward: bool,
+) -> "Word | None":
+    """Search word for the nearest window of len(trm) that models trm.
+
+    For rightward search, scans from anchor toward the end of the word.
+    For leftward search, scans from anchor toward the beginning.
+    Returns the first matching window found, or None.
+    """
+    n = len(trm)
+    if n == 0:
+        return []
+    if rightward:
+        for j in range(anchor, len(word) - n + 1):
+            candidate = word[j : j + n]
+            if operations.models(candidate, trm):
+                return list(candidate)
+    else:
+        for j in range(anchor, -1, -1):
+            candidate = word[j : j + n]
+            if operations.models(candidate, trm):
+                return list(candidate)
+    return None
+
+
 def apply_rule(
     rule: Rule,
     out_ast: ast.Expr,
@@ -79,10 +112,9 @@ def apply_rule(
     """Apply a single S&C rule to a word, returning the transformed word.
 
     Scans left-to-right for non-overlapping target windows (INR).  For each
-    target, the trigger window (TRM) is checked on the side indicated by Dir:
-      Dir="R" — trigger immediately to the right of the target
-      Dir="L" — trigger immediately to the left of the target
-    When both windows match, OUT is evaluated and the target is replaced.
+    target, searches in direction Dir for the nearest window that models TRM
+    (which may be non-adjacent).  When found, OUT is evaluated and the target
+    is replaced.
     """
     m = len(rule.Inr)  # target window length
     n = len(rule.Trm)  # trigger window length
@@ -95,20 +127,11 @@ def apply_rule(
             continue
 
         if rule.Dir == "R":
-            trm_start = i + m
-            trm_end = trm_start + n
-            if trm_end > len(result):
-                i += 1
-                continue
-            trigger = result[trm_start:trm_end]
-        else:  # "L"
-            trm_start = i - n
-            if trm_start < 0:
-                i += 1
-                continue
-            trigger = result[trm_start:i]
+            trigger = _find_trigger(result, rule.Trm, i + m, rightward=True)
+        else:
+            trigger = _find_trigger(result, rule.Trm, i - n, rightward=False)
 
-        if not operations.models(trigger, rule.Trm):
+        if trigger is None:
             i += 1
             continue
 

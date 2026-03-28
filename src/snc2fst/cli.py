@@ -1,3 +1,4 @@
+import sys
 import traceback
 import click
 import importlib.resources
@@ -35,29 +36,80 @@ def main():
     default="config.toml",
     help="Name of the main configuration file to generate.",
 )
-def init(filename):
+@click.option(
+    "--from",
+    "from_starter",
+    default=None,
+    help="Initialize from a named starter project.",
+)
+@click.option(
+    "--pick",
+    "pick_starter",
+    is_flag=True,
+    default=False,
+    help="Interactively choose a starter project.",
+)
+def init(filename, from_starter, pick_starter):
     """Initialize a new grammar configuration and supporting template files."""
     config_path = Path(filename)
     dir_path = config_path.parent
 
-    alphabet_path = dir_path / "alphabet.csv"
-    tests_path = dir_path / "tests.tsv"
+    starters_dir = importlib.resources.files("snc2fst").joinpath("templates/starters")
+    templates_dir = importlib.resources.files("snc2fst").joinpath("templates")
 
-    for target_file in [config_path, alphabet_path, tests_path]:
+    if from_starter is not None and pick_starter:
+        click.echo("Error: --from and --pick are mutually exclusive.", err=True)
+        raise click.Abort()
+
+    if pick_starter:
+        available = sorted(p.name for p in starters_dir.iterdir() if p.is_dir())
+        if not sys.stdin.isatty():
+            click.echo(
+                "Error: --pick requires an interactive terminal. Use --from NAME instead.",
+                err=True,
+            )
+            click.echo(f"Available starters: {', '.join(available)}", err=True)
+            raise click.Abort()
+        import questionary
+        from_starter = questionary.select(
+            "Choose a starter:", choices=available
+        ).ask()
+        if from_starter is None:
+            raise click.Abort()
+
+    if from_starter is not None:
+        available = sorted(p.name for p in starters_dir.iterdir() if p.is_dir())
+        if from_starter not in available:
+            click.echo(
+                f"Error: unknown starter '{from_starter}'. Available: {', '.join(available)}",
+                err=True,
+            )
+            raise click.Abort()
+
+        source_dir = starters_dir.joinpath(from_starter)
+        source_files = [
+            (config_path, source_dir.joinpath("config.toml")),
+            (dir_path / "alphabet.csv", source_dir.joinpath("alphabet.csv")),
+            (dir_path / "tests.tsv", source_dir.joinpath("tests.tsv")),
+        ]
+    else:
+        source_files = [
+            (config_path, templates_dir.joinpath("default_config.toml")),
+            (dir_path / "alphabet.csv", templates_dir.joinpath("default_alphabet.csv")),
+            (dir_path / "tests.tsv", templates_dir.joinpath("default_tests.tsv")),
+        ]
+
+    for target_file, _ in source_files:
         if target_file.exists():
             click.echo(f"Error: '{target_file}' already exists.", err=True)
             raise click.Abort()
 
-    templates_dir = importlib.resources.files("snc2fst").joinpath("templates")
-
-    config_path.write_text(templates_dir.joinpath("default_config.toml").read_text())
-    alphabet_path.write_text(templates_dir.joinpath("default_alphabet.csv").read_text())
-    tests_path.write_text(templates_dir.joinpath("default_tests.tsv").read_text())
+    for target_file, source in source_files:
+        target_file.write_text(source.read_text())
 
     click.echo("Successfully initialized project files:")
-    click.echo(f"  - {config_path.name}")
-    click.echo(f"  - {alphabet_path.name}")
-    click.echo(f"  - {tests_path.name}")
+    for target_file, _ in source_files:
+        click.echo(f"  - {target_file.name}")
 
 
 @main.command()
@@ -147,7 +199,7 @@ def validate(config_file):
         for err in out_errors:
             click.echo(f"      - {err}", err=True)
         raise click.Abort()
-    click.echo("  [✓] All Out expressions are valid.")
+    click.echo("  [✓] All Out expressions are syntactically valid.")
 
     try:
         tests = load_tests(base_dir / config.tests_path)

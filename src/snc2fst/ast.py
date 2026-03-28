@@ -86,7 +86,7 @@ class If:
 @dataclass
 class Unify:
     segment: Expr
-    features: FeatureSpec
+    features: "Expr"  # FeatureSpec literal or any segment-returning expression
 
 
 @dataclass
