@@ -1,0 +1,32 @@
+alphabet_path = "alphabet.csv"
+tests_path = "tests.tsv"
+
+# R1a: Schwa epenthesis after stridents (s, z)
+[[rules]]
+Id = "R1a"
+Dir = "L"
+Inr = [["-Labial", "+Strident"], ["-Syllabic", "+Strident"]]
+Trm = []
+Out = """
+(concat
+    (nth 1 INR)
+    'ə
+    (nth 2 INR)
+)
+"""
+
+# R1b: Schwa epenthesis after distributed coronals (ʃ, ʒ)
+[[rules]]
+Id = "R1b"
+Dir = "L"
+Inr = [["+Coronal", "+Distributed"], ["-Syllabic", "+Strident"]]
+Trm = []
+Out = "(concat (nth 1 INR) 'ə (nth 2 INR))"
+
+# R2: Voicing harmony
+[[rules]]
+Id = "R2"
+Dir = "L"
+Inr = [["-Syllabic"]]
+Trm = [[]]
+Out = "(unify (nth 1 INR) (project (nth 1 TRM) [Voice]))"
