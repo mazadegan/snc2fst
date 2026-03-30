@@ -9,7 +9,7 @@ import tomllib
 import pynini
 from pydantic import ValidationError
 from snc2fst.models import GrammarConfig
-from snc2fst.alphabet import TokenizeError, load_alphabet, tokenize, word_to_str
+from snc2fst.alphabet import TokenizeError, check_alphabet, load_alphabet, tokenize, word_to_str
 from snc2fst.io import load_tests
 from snc2fst import dsl
 from snc2fst.evaluator import EvalError, apply_rule
@@ -112,20 +112,40 @@ def init(filename, from_starter, pick_starter):
         click.echo(f"  - {target_file.name}")
 
 
-@main.command()
-@click.argument("config_file", type=click.Path(exists=True, dir_okay=False))
-def validate(config_file):
-    """Validate the grammar configuration and all supporting files."""
-    config_path = Path(config_file)
+from dataclasses import dataclass, field as dc_field
+
+
+@dataclass
+class _ValidationResult:
+    config: object = None
+    alphabet: dict = dc_field(default_factory=dict)
+    tests: list = dc_field(default_factory=list)
+    warnings: list[str] = dc_field(default_factory=list)
+    ok: bool = True
+
+
+def _run_validate(config_path: Path, verbose: bool = False) -> _ValidationResult:
+    """Run all validation checks, printing results if verbose.
+
+    Returns a _ValidationResult. If ok=False, at least one hard error was found
+    and the result's config/alphabet/tests may be incomplete.
+    """
+    result = _ValidationResult()
     base_dir = config_path.parent
 
-    click.echo(f"Validating project at: {config_path}")
+    def info(msg):
+        if verbose:
+            click.echo(msg)
 
+    def error(msg):
+        click.echo(msg, err=True)
+
+    # --- config.toml ---
     try:
-        config = _load_config(config_path)
-        click.echo("  [✓] config.toml parsed successfully.")
+        result.config = _load_config(config_path)
+        info("  [✓] config.toml parsed successfully.")
     except ValidationError as e:
-        click.echo("  [x] Configuration validation failed in config.toml:", err=True)
+        error("  [x] Configuration validation failed in config.toml:")
         for err in e.errors():
             parts = []
             for loc in err["loc"]:
@@ -137,47 +157,63 @@ def validate(config_file):
                     parts.append(str(loc))
             loc_str = "".join(parts)
             bad_input = repr(err.get("input", "Unknown"))
-            click.echo(f"      - {loc_str}: {err['msg']} (Got: {bad_input})", err=True)
-        raise click.Abort()
+            error(f"      - {loc_str}: {err['msg']} (Got: {bad_input})")
+        result.ok = False
+        return result
     except Exception as e:
-        click.echo(f"  [x] Failed to read config.toml:\n{e}", err=True)
-        raise click.Abort()
+        error(f"  [x] Failed to read config.toml:\n{e}")
+        result.ok = False
+        return result
 
+    # --- alphabet ---
     try:
-        alphabet = load_alphabet(base_dir / config.alphabet_path)
-        click.echo(
-            f"  [✓] {config.alphabet_path} loaded with {len(alphabet)} segments."
-        )
+        result.alphabet = load_alphabet(base_dir / result.config.alphabet_path)
+        info(f"  [✓] {result.config.alphabet_path} loaded with {len(result.alphabet)} segments.")
     except FileNotFoundError:
-        click.echo(
-            f"  [x] Missing alphabet file: {base_dir / config.alphabet_path}", err=True
-        )
-        raise click.Abort()
+        error(f"  [x] Missing alphabet file: {base_dir / result.config.alphabet_path}")
+        result.ok = False
+        return result
     except Exception as e:
-        click.echo(f"  [x] Failed to read alphabet file:\n{e}", err=True)
-        raise click.Abort()
+        error(f"  [x] Failed to read alphabet file:\n{e}")
+        result.ok = False
+        return result
 
-    valid_features = {f for seg in alphabet.values() for f in seg}
+    alph_errors, alph_warnings = check_alphabet(result.alphabet)
+    result.warnings.extend(alph_warnings)
+    for w in alph_warnings:
+        info(f"  [!] {w}")
+    if alph_errors:
+        error("  [x] Alphabet segment errors:")
+        for e in alph_errors:
+            error(f"      - {e}")
+        result.ok = False
+        return result
+    if not alph_warnings:
+        info("  [✓] All segments are distinguishable.")
 
+    valid_features = {f for seg in result.alphabet.values() for f in seg}
+
+    # --- rule features ---
     rule_errors = []
-    for rule in config.rules:
+    for rule in result.config.rules:
         for feature_spec in itertools.chain(rule.Inr, rule.Trm):
             for sign, feature_name in feature_spec:
                 if feature_name not in valid_features:
                     rule_errors.append(
                         f"Rule '{rule.Id}' uses undefined feature '{feature_name}'."
                     )
-
     if rule_errors:
-        click.echo("  [x] Feature validation failed:", err=True)
-        for err in rule_errors:
-            click.echo(f"      - {err}", err=True)
-        raise click.Abort()
-    click.echo("  [✓] All rule features match the alphabet matrix.")
+        error("  [x] Feature validation failed:")
+        for e in rule_errors:
+            error(f"      - {e}")
+        result.ok = False
+        return result
+    info("  [✓] All rule features match the alphabet matrix.")
 
+    # --- Out expressions ---
     out_errors = []
-    valid_segments = set(alphabet)
-    for rule in config.rules:
+    valid_segments = set(result.alphabet)
+    for rule in result.config.rules:
         try:
             out_ast = dsl.parse(rule.Out)
         except dsl.ParseError as e:
@@ -193,44 +229,54 @@ def validate(config_file):
                 valid_features=valid_features,
             )
         )
-
     if out_errors:
-        click.echo("  [x] Out expression validation failed:", err=True)
-        for err in out_errors:
-            click.echo(f"      - {err}", err=True)
-        raise click.Abort()
-    click.echo("  [✓] All Out expressions are syntactically valid.")
+        error("  [x] Out expression validation failed:")
+        for e in out_errors:
+            error(f"      - {e}")
+        result.ok = False
+        return result
+    info("  [✓] All Out expressions are syntactically valid.")
 
+    # --- tests file ---
     try:
-        tests = load_tests(base_dir / config.tests_path)
-        click.echo(
-            f"  [✓] {config.tests_path} loaded with {len(tests)} test cases."
-        )
+        result.tests = load_tests(base_dir / result.config.tests_path)
+        info(f"  [✓] {result.config.tests_path} loaded with {len(result.tests)} test cases.")
     except FileNotFoundError:
-        click.echo(
-            f"  [x] Missing tests file: {base_dir / config.tests_path}", err=True
-        )
-        raise click.Abort()
+        error(f"  [x] Missing tests file: {base_dir / result.config.tests_path}")
+        result.ok = False
+        return result
     except Exception as e:
-        click.echo(f"  [x] Failed to read tests file:\n{e}", err=True)
-        raise click.Abort()
+        error(f"  [x] Failed to read tests file:\n{e}")
+        result.ok = False
+        return result
 
     tok_errors = []
-    for i, (inp, out) in enumerate(tests, 1):
+    for i, (inp, out) in enumerate(result.tests, 1):
         for word_str, label in [(inp, "input"), (out, "output")]:
             try:
-                tokenize(word_str, alphabet)
+                tokenize(word_str, result.alphabet)
             except TokenizeError as e:
                 tok_errors.append(f"Test {i} {label} '{word_str}': {e}")
-
     if tok_errors:
-        click.echo("  [x] Test word tokenization failed:", err=True)
-        for err in tok_errors:
-            click.echo(f"      - {err}", err=True)
-        raise click.Abort()
-    click.echo("  [✓] All test words tokenize unambiguously.")
+        error("  [x] Test word tokenization failed:")
+        for e in tok_errors:
+            error(f"      - {e}")
+        result.ok = False
+        return result
+    info("  [✓] All test words tokenize unambiguously.")
 
-    click.echo("All files valid.")
+    return result
+
+
+@main.command()
+@click.argument("config_file", type=click.Path(exists=True, dir_okay=False))
+def validate(config_file):
+    """Validate the grammar configuration and all supporting files."""
+    config_path = Path(config_file)
+    click.echo(f"Validating project at: {config_path}")
+    result = _run_validate(config_path, verbose=True)
+    if result.ok:
+        click.echo("All files valid.")
 
 
 @main.command(name="eval")
@@ -247,32 +293,32 @@ def validate(config_file):
     default=None,
     help="Write output to a file instead of stdout.",
 )
-def eval_cmd(config_file, fmt, output):
+@click.option(
+    "--no-warn", "no_warn",
+    is_flag=True,
+    default=False,
+    help="Suppress alphabet warnings.",
+)
+def eval_cmd(config_file, fmt, output, no_warn):
     """Apply grammar rules to all test cases and report results."""
     config_path = Path(config_file)
-    base_dir = config_path.parent
-
-    try:
-        config = _load_config(config_path)
-    except Exception as e:
-        click.echo(f"[x] Failed to load config: {e}", err=True)
-        raise click.Abort()
-
-    try:
-        alphabet = load_alphabet(base_dir / config.alphabet_path)
-    except FileNotFoundError:
+    v = _run_validate(config_path, verbose=False)
+    if not v.ok:
         click.echo(
-            f"[x] Missing alphabet file: {base_dir / config.alphabet_path}", err=True
+            f"[x] Validation failed. Run 'snc validate {config_file}' for details.",
+            err=True,
         )
         raise click.Abort()
 
-    try:
-        tests = load_tests(base_dir / config.tests_path)
-    except FileNotFoundError:
-        click.echo(
-            f"[x] Missing tests file: {base_dir / config.tests_path}", err=True
-        )
-        raise click.Abort()
+    if v.warnings and not no_warn:
+        click.echo("Warnings:")
+        for w in v.warnings:
+            click.echo(f"  [!] {w}")
+        click.echo()
+
+    config = v.config
+    alphabet = v.alphabet
+    tests = v.tests
 
     try:
         out_asts = {rule.Id: dsl.parse(rule.Out) for rule in config.rules}
@@ -281,6 +327,7 @@ def eval_cmd(config_file, fmt, output):
         raise click.Abort()
 
     # Run every test case, collecting per-rule intermediate states.
+    click.echo("Results:")
     rule_ids = [rule.Id for rule in config.rules]
     passed = failed = errors = 0
     good_inputs: list[str] = []

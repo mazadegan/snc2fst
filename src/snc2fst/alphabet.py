@@ -19,14 +19,71 @@ def load_alphabet(path: Path) -> dict[str, Segment]:
     segments = [s.strip() for s in rows[0][1:] if s.strip()]
     alphabet: dict[str, Segment] = {seg: {} for seg in segments}
 
+    seen_features: list[str] = []
+    duplicate_features: list[str] = []
     for row in rows[1:]:
         if not row or not row[0].strip():
             continue
         feature = row[0].strip()
+        if feature in seen_features:
+            duplicate_features.append(feature)
+        else:
+            seen_features.append(feature)
         for seg, val in zip(segments, row[1:]):
             alphabet[seg][feature] = val.strip()
 
+    if duplicate_features:
+        dupes = ", ".join(f"'{f}'" for f in duplicate_features)
+        raise ValueError(f"Duplicate feature row(s) in alphabet: {dupes}.")
+
     return alphabet
+
+
+def check_alphabet(alphabet: dict[str, Segment]) -> tuple[list[str], list[str]]:
+    """Check for duplicate features and indistinguishable segments.
+
+    Returns (errors, warnings) where:
+      errors   — pairs of segments with identical full feature bundles
+      warnings — segments that are underspecified relative to one or more others
+                 (their specified features are a proper subset of another's)
+    """
+    errors: list[str] = []
+    warnings: list[str] = []
+    names = list(alphabet.keys())
+
+    # Check for identical bundles (error)
+    seen: dict[frozenset, str] = {}
+    for name in names:
+        key = frozenset(alphabet[name].items())
+        if key in seen:
+            errors.append(
+                f"Segments '{seen[key]}' and '{name}' are identical — "
+                "they have exactly the same feature bundle."
+            )
+        else:
+            seen[key] = name
+
+    # Check for underspecification subset relationship (warning)
+    def specified(seg: Segment) -> frozenset:
+        return frozenset((f, v) for f, v in seg.items() if v in ("+", "-"))
+
+    for i, a in enumerate(names):
+        spec_a = specified(alphabet[a])
+        supers = []
+        for b in names:
+            if b == a:
+                continue
+            spec_b = specified(alphabet[b])
+            if spec_a < spec_b:  # proper subset: a is underspecified relative to b
+                supers.append(b)
+        if supers:
+            warnings.append(
+                f"Segment '{a}' is underspecified relative to: "
+                + ", ".join(f"'{s}'" for s in supers)
+                + "."
+            )
+
+    return errors, warnings
 
 
 def _all_parses(s: str, names: frozenset[str]) -> list[list[str]]:
