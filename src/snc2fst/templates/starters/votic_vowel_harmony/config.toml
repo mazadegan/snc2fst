@@ -1,6 +1,12 @@
 alphabet_path = "alphabet.csv"
 tests_path = "tests.tsv"
 
+[meta]
+title = "Votic vowel harmony"
+language = "vot"
+description = "Back vowel harmony in Votic: suffix vowels agree in backness with the nearest preceding vowel trigger."
+sources = ["Leduc, Reiss & Volenec (2020), Votic vowel harmony in Substance Free Logical Phonology. The Oxford Handbook of Vowel Harmony. LingBuzz/005339."]
+
 # R1: copy Back from the nearest preceding non-high vowel
 [[rules]]
 Id = "R1"

@@ -14,6 +14,7 @@ dependencies = [
     "prettytable>=3.0.0",
     "pydantic>=2.0.0",
     "questionary>=2.0.0",
+    "langcodes[data]>=3.3.0",
 ]
 
 [project.optional-dependencies]

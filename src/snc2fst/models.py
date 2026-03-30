@@ -1,9 +1,16 @@
 import re
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
 from typing import Literal
 from snc2fst.types import FeatureSpecSequence
 
 FEATURE_PATTERN = re.compile(r'^([+\-])(\w+)$')
+
+
+class Meta(BaseModel):
+    title: str
+    language: str          # ISO 639-3 preferred; 639-2 or names accepted at load time
+    description: str = ""
+    sources: list[str] = []
 
 class Rule(BaseModel):
     Id: str
@@ -36,6 +43,7 @@ class Rule(BaseModel):
         return parsed_sequence
 
 class GrammarConfig(BaseModel):
+    meta: Meta
     alphabet_path: str
     tests_path: str
     rules: list[Rule]

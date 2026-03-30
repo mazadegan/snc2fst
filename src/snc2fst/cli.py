@@ -23,6 +23,93 @@ def _load_config(config_file) -> GrammarConfig:
     return GrammarConfig(**raw_dict)
 
 
+def _resolve_language(raw: str) -> tuple[str, str | None]:
+    """Resolve a language name or code to (code, display_name).
+
+    If the input is unrecognized, returns (raw, None) so the caller can warn.
+    """
+    import langcodes
+    stripped = raw.strip()
+
+    # Try as a direct code first (1-3 alpha chars, typical for 639 codes).
+    try:
+        lang = langcodes.get(stripped)
+        if lang.is_valid():
+            return lang.to_alpha3(), lang.display_name()
+    except Exception:
+        pass
+
+    # Try name search.
+    try:
+        found = langcodes.find(stripped)
+        if found.is_valid():
+            return found.to_alpha3(), found.display_name()
+    except LookupError:
+        pass
+
+    return stripped, None
+
+
+def _run_meta_wizard(config_path: Path) -> None:
+    """Interactively collect metadata and patch [meta] in the written config."""
+    import questionary
+
+    click.echo("\nNew project setup — please provide some metadata.")
+    click.echo("(Press Enter to skip optional fields.)\n")
+
+    title = questionary.text("Grammar title:").ask()
+    if title is None:
+        raise click.Abort()
+
+    lang_raw = questionary.text("Language name or ISO 639-3 code:").ask()
+    if lang_raw is None:
+        raise click.Abort()
+
+    lang_code, lang_display = _resolve_language(lang_raw)
+    if lang_display is None:
+        click.echo(
+            f"  [!] '{lang_raw}' is not a recognized ISO 639 code or language name. "
+            "It will be stored as-is.",
+            err=True,
+        )
+    else:
+        click.echo(f"  → Resolved to: {lang_display} ({lang_code})")
+
+    description = questionary.text("Description (optional):").ask() or ""
+    if description is None:
+        raise click.Abort()
+
+    sources: list[str] = []
+    click.echo("Sources/references (optional) — enter one per line, blank line to finish:")
+    while True:
+        entry = questionary.text("  Source:").ask()
+        if entry is None:
+            raise click.Abort()
+        if not entry.strip():
+            break
+        sources.append(entry.strip())
+
+    click.echo()
+
+    # Patch the [meta] block in the written config file.
+    text = config_path.read_text(encoding="utf-8")
+
+    def _toml_escape(s: str) -> str:
+        return s.replace("\\", "\\\\").replace('"', '\\"')
+
+    def _toml_str_list(items: list[str]) -> str:
+        return "[" + ", ".join(f'"{_toml_escape(s)}"' for s in items) + "]"
+
+    text = text.replace('title = ""', f'title = "{_toml_escape(title)}"', 1)
+    text = text.replace('language = ""', f'language = "{_toml_escape(lang_code)}"', 1)
+    text = text.replace('description = ""', f'description = "{_toml_escape(description)}"', 1)
+    text = text.replace('sources = []', f'sources = {_toml_str_list(sources)}', 1)
+    # Remove the comment line added by the template.
+    text = text.replace("\n# [meta] is filled in by `snc init` — do not edit manually.", "", 1)
+
+    config_path.write_text(text, encoding="utf-8")
+
+
 @click.group()
 def main():
     """SNC: Compile Search-and-Change grammars to OpenFST transducers."""
@@ -106,6 +193,10 @@ def init(filename, from_starter, pick_starter):
 
     for target_file, source in source_files:
         target_file.write_text(source.read_text())
+
+    # For new projects (no starter), run the metadata wizard and patch [meta].
+    if from_starter is None:
+        _run_meta_wizard(config_path)
 
     click.echo("Successfully initialized project files:")
     for target_file, _ in source_files:

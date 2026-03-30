@@ -1,6 +1,13 @@
 alphabet_path = "alphabet.csv"
 tests_path = "tests.tsv"
 
+# [meta] is filled in by `snc init` — do not edit manually.
+[meta]
+title = ""
+language = ""
+description = ""
+sources = []
+
 [[rules]]
 Id = "R_0"
 Inr = [["-F2"]]

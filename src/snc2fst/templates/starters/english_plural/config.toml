@@ -1,6 +1,12 @@
 alphabet_path = "alphabet.csv"
 tests_path = "tests.tsv"
 
+[meta]
+title = "English plural allomorphy"
+language = "eng"
+description = "Schwa epenthesis after stridents and distributed coronals, followed by voicing harmony of the plural suffix /S/."
+sources = ["Kenstowicz & Kisseberth (1979), Generative Phonology, Ch. 1, p. 16"]
+
 # R1a: Schwa epenthesis after stridents (s, z)
 [[rules]]
 Id = "R1a"
