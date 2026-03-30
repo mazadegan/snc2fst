@@ -489,5 +489,49 @@ def compile_cmd(config_file, output, fmt, max_arcs, no_optimize, verbose):
             die(f"Rule '{rule.Id}': failed to write FST: {e}", e)
 
 
+@main.command("export")
+@click.argument("config_file", type=click.Path(exists=True, dir_okay=False))
+@click.option(
+    "--format", "-f",
+    "fmt",
+    type=click.Choice(["txt", "latex"]),
+    default="txt",
+    show_default=True,
+    help="Output format.",
+)
+@click.option(
+    "--output", "-o",
+    type=click.Path(dir_okay=False),
+    default=None,
+    help="Write output to this file instead of stdout.",
+)
+def export_cmd(config_file, fmt, output):
+    """Export the grammar and alphabet to txt or LaTeX format."""
+    from snc2fst.export import export_txt, export_latex
+
+    config_path = Path(config_file)
+    base_dir = config_path.parent
+
+    try:
+        config = _load_config(config_path)
+    except Exception as e:
+        click.echo(f"[x] Failed to load config: {e}", err=True)
+        raise click.Abort()
+
+    try:
+        alphabet = load_alphabet(base_dir / config.alphabet_path)
+    except Exception as e:
+        click.echo(f"[x] Failed to load alphabet: {e}", err=True)
+        raise click.Abort()
+
+    rendered = export_latex(config, alphabet) if fmt == "latex" else export_txt(config, alphabet)
+
+    if output:
+        Path(output).write_text(rendered, encoding="utf-8")
+        click.echo(f"Exported to {output}")
+    else:
+        click.echo(rendered)
+
+
 if __name__ == "__main__":
     main()
