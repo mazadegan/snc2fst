@@ -410,9 +410,9 @@ def _write_att(fst: pynini.Fst, path: Path) -> None:
 @main.command(name="compile")
 @click.argument("config_file", type=click.Path(exists=True, dir_okay=False))
 @click.option(
-    "--output", "-o",
+    "--dir", "-d", "out_dir",
     default=None,
-    help="Base output path (no extension). Defaults to <config_dir>/grammar.",
+    help="Output directory for compiled FSTs. Defaults to <config_dir>/transducers/.",
 )
 @click.option(
     "--format", "fmt",
@@ -441,11 +441,10 @@ def _write_att(fst: pynini.Fst, path: Path) -> None:
     default=False,
     help="Print full tracebacks on error.",
 )
-def compile_cmd(config_file, output, fmt, max_arcs, no_optimize, verbose):
-    """Compile all grammar rules to a single composed FST transducer."""
+def compile_cmd(config_file, out_dir, fmt, max_arcs, no_optimize, verbose):
+    """Compile all grammar rules to FST transducers, written to a directory."""
     config_path = Path(config_file)
-    base_dir = config_path.parent
-    out_base = Path(output) if output else base_dir / "grammar"
+    out_path = Path(out_dir) if out_dir else config_path.parent / "transducers"
 
     def die(msg: str, exc: BaseException | None = None) -> None:
         click.echo(f"[x] {msg}", err=True)
@@ -453,19 +452,15 @@ def compile_cmd(config_file, output, fmt, max_arcs, no_optimize, verbose):
             click.echo(traceback.format_exc(), err=True)
         raise click.Abort()
 
-    # Load config
-    try:
-        config = _load_config(config_path)
-    except Exception as e:
-        die(f"Failed to load config: {e}", e)
+    v = _run_validate(config_path, verbose=False)
+    if not v.ok:
+        die(f"Validation failed. Run 'snc validate {config_file}' for details.")
 
-    # Load alphabet
-    try:
-        base_alphabet = load_alphabet(base_dir / config.alphabet_path)
-    except FileNotFoundError as e:
-        die(f"Missing alphabet file: {base_dir / config.alphabet_path}", e)
-    except Exception as e:
-        die(f"Failed to read alphabet: {e}", e)
+    for w in v.warnings:
+        click.echo(f"[!] {w}")
+
+    config = v.config
+    base_alphabet = v.alphabet
 
     if not config.rules:
         die("No rules defined in config.")
@@ -512,11 +507,18 @@ def compile_cmd(config_file, output, fmt, max_arcs, no_optimize, verbose):
 
         fsts.append(fst)
 
+    # Create output directory
+    try:
+        out_path.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        die(f"Failed to create output directory '{out_path}': {e}", e)
+
+    click.echo(f"Writing to {out_path}/")
+
     # Write one FST per rule
     for rule, fst in zip(config.rules, fsts):
         sym = fst.input_symbols()
-        stem = f"{out_base}_{rule.Id}"
-        sym_path = Path(stem).with_suffix(".syms")
+        sym_path = out_path / f"{rule.Id}.syms"
         try:
             _write_syms(sym, sym_path)
         except Exception as e:
@@ -525,11 +527,11 @@ def compile_cmd(config_file, output, fmt, max_arcs, no_optimize, verbose):
         try:
             total_arcs = sum(1 for s in fst.states() for _ in fst.arcs(s))
             if fmt == "fst":
-                fst_path = Path(stem).with_suffix(".fst")
+                fst_path = out_path / f"{rule.Id}.fst"
                 fst.write(str(fst_path))
                 click.echo(f"  {rule.Id}: {fst.num_states():,} states, {total_arcs:,} arcs → {fst_path.name}")
             else:
-                att_path = Path(stem).with_suffix(".att")
+                att_path = out_path / f"{rule.Id}.att"
                 _write_att(fst, att_path)
                 click.echo(f"  {rule.Id}: {fst.num_states():,} states, {total_arcs:,} arcs → {att_path.name}")
         except Exception as e:
@@ -557,21 +559,18 @@ def export_cmd(config_file, fmt, output):
     from snc2fst.export import export_txt, export_latex
 
     config_path = Path(config_file)
-    base_dir = config_path.parent
-
-    try:
-        config = _load_config(config_path)
-    except Exception as e:
-        click.echo(f"[x] Failed to load config: {e}", err=True)
+    v = _run_validate(config_path, verbose=False)
+    if not v.ok:
+        click.echo(
+            f"[x] Validation failed. Run 'snc validate {config_file}' for details.",
+            err=True,
+        )
         raise click.Abort()
 
-    try:
-        alphabet = load_alphabet(base_dir / config.alphabet_path)
-    except Exception as e:
-        click.echo(f"[x] Failed to load alphabet: {e}", err=True)
-        raise click.Abort()
+    for w in v.warnings:
+        click.echo(f"[!] {w}")
 
-    rendered = export_latex(config, alphabet) if fmt == "latex" else export_txt(config, alphabet)
+    rendered = export_latex(v.config, v.alphabet) if fmt == "latex" else export_txt(v.config, v.alphabet)
 
     if output:
         Path(output).write_text(rendered, encoding="utf-8")
