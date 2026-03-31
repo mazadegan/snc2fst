@@ -9,7 +9,12 @@ def load_tests(filepath: Path) -> list[tuple[str, str]]:
     with filepath.open("r", encoding="utf-8") as f:
         reader = csv.reader(f, delimiter=delimiter)
         next(reader, None)  # skip header
-        for row in reader:
-            if len(row) >= 2:
-                tests.append((row[0].strip(), row[1].strip()))
+        for lineno, row in enumerate(reader, start=2):  # 1-based, header is line 1
+            if not any(cell.strip() for cell in row):
+                continue  # blank line
+            if len(row) < 2 or len(row) > 3:
+                raise ValueError(
+                    f"{filepath}:{lineno}: expected 2 or 3 columns, got {len(row)}"
+                )
+            tests.append((row[0].strip(), row[1].strip()))
     return tests
