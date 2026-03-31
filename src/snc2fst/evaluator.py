@@ -160,7 +160,10 @@ def apply_rule(
             i += 1
             continue
 
-        raw = evaluate(out_ast, target, trigger, alphabet)
+        try:
+            raw = evaluate(out_ast, target, trigger, alphabet)
+        except EvalError as e:
+            raise EvalError(f"Rule '{rule.Id}': {e}") from e
         out: Word = [raw] if isinstance(raw, dict) else list(raw)  # type: ignore[arg-type]
         result[i : i + m] = out
         i += len(out)

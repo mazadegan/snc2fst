@@ -478,10 +478,7 @@ def eval_cmd(config_file, word, fmt, output, no_warn, use_fst):
             fsts[rule.Id] = fst
 
         def _apply_fst_chain(inp_str: str) -> str:
-            try:
-                tokens = tokenize(inp_str, alphabet)
-            except TokenizeError as e:
-                raise EvalError(str(e))
+            tokens = tokenize(inp_str, alphabet)
             current = ["⋊"] + list(tokens) + ["⋉"]
             for rule in config.rules:
                 current = transduce(fsts[rule.Id], rule, current)
@@ -492,6 +489,9 @@ def eval_cmd(config_file, word, fmt, output, no_warn, use_fst):
             try:
                 result = _apply_fst_chain(input_word)
                 click.echo(f"{input_word} → {result}")
+            except TokenizeError as e:
+                click.echo(f"[x] Unknown input: {e}", err=True)
+                raise click.Abort()
             except (EvalError, ValueError) as e:
                 click.echo(f"[x] {e}", err=True)
                 raise click.Abort()
@@ -503,6 +503,10 @@ def eval_cmd(config_file, word, fmt, output, no_warn, use_fst):
         for i, (inp_str, exp_str) in enumerate(tests, 1):
             try:
                 result = _apply_fst_chain(inp_str)
+            except TokenizeError as e:
+                click.echo(f"  [{i}] ERROR  {inp_str}: unknown input: {e}", err=True)
+                errors += 1
+                continue
             except (EvalError, ValueError) as e:
                 click.echo(f"  [{i}] ERROR  {inp_str}: {e}", err=True)
                 errors += 1

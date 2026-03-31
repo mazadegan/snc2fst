@@ -228,10 +228,11 @@ def _rev_map(alphabet: dict[str, Segment]) -> dict[frozenset, str]:
     return rmap
 
 
-def _seg_name(seg: Segment, rmap: dict[frozenset, str]) -> str:
+def _seg_name(seg: Segment, rmap: dict[frozenset, str], rule_id: str = "") -> str:
     key = frozenset(seg.items())
     if key not in rmap:
-        raise CompileError(f"Out produced a segment not in the alphabet: {seg}")
+        prefix = f"Rule '{rule_id}': " if rule_id else ""
+        raise CompileError(f"{prefix}Out expression produced a segment not in the alphabet: {seg!r}")
     return rmap[key]
 
 
@@ -241,10 +242,11 @@ def _eval_out_names(
     out_ast,
     alphabet: dict[str, Segment],
     rmap: dict[frozenset, str],
+    rule_id: str = "",
 ) -> list[str]:
     result = evaluate(out_ast, inr_segs, trm_segs, alphabet)
     segs: list[Segment] = [result] if isinstance(result, dict) else list(result)
-    return [_seg_name(s, rmap) for s in segs]
+    return [_seg_name(s, rmap, rule_id) for s in segs]
 
 
 def _emit_chain(
@@ -311,7 +313,7 @@ def _compile_n1_m1(
             xl = sym.find(x_name)
             if operations.models([x_seg], rule.Inr):
                 out_names = _eval_out_names(
-                    [x_seg], [sigma_seg], out_ast, alphabet, rmap
+                    [x_seg], [sigma_seg], out_ast, alphabet, rmap, rule.Id
                 )
             else:
                 out_names = [x_name]
@@ -373,7 +375,7 @@ def _compile_n_m0(
 
                 if operations.models(check_segs, rule.Inr):
                     out_names = _eval_out_names(
-                        check_segs, [], out_ast, alphabet, rmap
+                        check_segs, [], out_ast, alphabet, rmap, rule.Id
                     )
                     # Reverse output so pynini.reverse restores original order
                     if dir_r:
@@ -443,7 +445,7 @@ def transduce(
 
     composed = pynini.compose(lin, fst)
     if composed.start() == -1:
-        raise ValueError(f"FST produced no output for input {segments!r}")
+        raise ValueError(f"Rule '{rule.Id}': FST produced no output for input \"{''.join(inp)}\"")
 
     result = []
     state = composed.start()
