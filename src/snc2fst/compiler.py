@@ -86,7 +86,8 @@ def _rule_output_segs(
     """Enumerate every segment Out can produce for the given rule and alphabet."""
     dir_r = rule.Dir == "R"
     n, m = len(rule.Inr), len(rule.Trm)
-    seg_list = list(alphabet.values())
+    ext = _extended_alphabet(alphabet)
+    seg_list = list(ext.values())
     produced: list[Segment] = []
 
     if m == 0:
@@ -150,8 +151,9 @@ def predict_arcs(
     _check_compilable(rule)
     dir_r = rule.Dir == "R"
     n, m = len(rule.Inr), len(rule.Trm)
-    sigma = len(alphabet)
-    seg_list = list(alphabet.values())
+    ext = _extended_alphabet(alphabet)
+    sigma = len(ext)
+    seg_list = list(ext.values())
 
     if m == 1:  # n=1, m=1
         trm_segs = [s for s in seg_list if operations.models([s], rule.Trm)]
@@ -182,26 +184,20 @@ def predict_arcs(
 # Shared helpers
 # ---------------------------------------------------------------------------
 
+def _extended_alphabet(alphabet: dict[str, Segment]) -> dict[str, Segment]:
+    """Return alphabet extended with ⋊/⋉ boundary pseudo-segments."""
+    ext = dict(alphabet)
+    ext["⋊"] = dict(BOS_SEGMENT)
+    ext["⋉"] = dict(EOS_SEGMENT)
+    return ext
+
+
 def _build_sym_table(alphabet: dict[str, Segment]) -> pynini.SymbolTable:
     sym = pynini.SymbolTable()
     sym.add_symbol("<eps>", 0)
-    for name in alphabet:
+    for name in _extended_alphabet(alphabet):
         sym.add_symbol(name)
-    sym.add_symbol("⋊")
-    sym.add_symbol("⋉")
     return sym
-
-
-def _add_boundary_arcs(
-    fst: pynini.Fst,
-    sym: pynini.SymbolTable,
-    state: int,
-    w,
-) -> None:
-    """Add BOS/EOS identity arcs from state back to itself."""
-    for bname in ("⋊", "⋉"):
-        bl = sym.find(bname)
-        fst.add_arc(state, pynini.Arc(bl, bl, w, state))
 
 
 def _rev_map(alphabet: dict[str, Segment]) -> dict[frozenset, str]:
@@ -264,6 +260,7 @@ def _compile_n1_m1(
     alphabet: dict[str, Segment],
     dir_r: bool,
 ) -> pynini.Fst:
+    ext = _extended_alphabet(alphabet)
     sym = _build_sym_table(alphabet)
     rmap = _rev_map(alphabet)
     w = pynini.Weight.one("tropical")
@@ -273,28 +270,24 @@ def _compile_n1_m1(
     fst.set_start(q_f)
     fst.set_final(q_f, w)
 
-    # One state per segment in L(Trm)
+    # One state per segment in L(Trm), including boundary pseudo-segments
     trm_state: dict[str, int] = {}
-    for name, seg in alphabet.items():
+    for name, seg in ext.items():
         if operations.models([seg], rule.Trm):
             s = fst.add_state()
             fst.set_final(s, w)
             trm_state[name] = s
 
-    # Boundary identity arcs on q_f (and all trm states — added below)
-    _add_boundary_arcs(fst, sym, q_f, w)
-
     # Transitions from q_f: emit x unchanged, update state if x ∈ L(Trm)
-    for x_name in alphabet:
+    for x_name in ext:
         xl = sym.find(x_name)
         dst = trm_state.get(x_name, q_f)
         _emit_chain(fst, sym, q_f, xl, [x_name], dst, w)
 
     # Transitions from each q_σ
     for sigma_name, q_sigma in trm_state.items():
-        _add_boundary_arcs(fst, sym, q_sigma, w)
-        sigma_seg = alphabet[sigma_name]
-        for x_name, x_seg in alphabet.items():
+        sigma_seg = ext[sigma_name]
+        for x_name, x_seg in ext.items():
             xl = sym.find(x_name)
             if operations.models([x_seg], rule.Inr):
                 out_names = _eval_out_names(
@@ -322,6 +315,7 @@ def _compile_n_m0(
     dir_r: bool,
 ) -> pynini.Fst:
     n = len(rule.Inr)
+    ext = _extended_alphabet(alphabet)
     sym = _build_sym_table(alphabet)
     rmap = _rev_map(alphabet)
     w = pynini.Weight.one("tropical")
@@ -342,9 +336,8 @@ def _compile_n_m0(
     while queue:
         buf = queue.popleft()
         src = get_state(buf)
-        _add_boundary_arcs(fst, sym, src, w)
 
-        for x_name, x_seg in alphabet.items():
+        for x_name, x_seg in ext.items():
             xl = sym.find(x_name)
             new_buf = buf + (x_name,)
 
@@ -354,7 +347,7 @@ def _compile_n_m0(
                 _emit_chain(fst, sym, src, xl, [], get_state(next_buf), w)
             else:
                 # Buffer full — check Inr match
-                buf_segs = [alphabet[nm] for nm in new_buf]
+                buf_segs = [ext[nm] for nm in new_buf]
                 # For Dir=R, input arrives in reversed order; check reversed buf
                 check_segs = list(reversed(buf_segs)) if dir_r else buf_segs
 

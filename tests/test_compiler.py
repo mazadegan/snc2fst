@@ -1,6 +1,6 @@
 """Tests for compiler.py.
 
-Uses a four-segment toy language with three features (voc, nas, lab):
+Uses a five-segment toy language with three features (voc, nas, lab):
 
   Segment  voc  nas  lab
   -------  ---  ---  ---
@@ -115,6 +115,27 @@ def _assert_agrees(rule: Rule, inputs: list[list[str]]) -> None:
             got = list(reversed(_transduce(fst, list(reversed(inp)))))
         else:
             got = _transduce(fst, inp)
+        assert got == ref, (
+            f"Mismatch on input {inp!r}: FST={got!r}, ref={ref!r}"
+        )
+
+
+def _assert_agrees_bounded(rule: Rule, inputs: list[list[str]]) -> None:
+    """Like _assert_agrees but brackets input with ⋊/⋉ for boundary-aware rules.
+
+    The FST receives the bracketed sequence; ⋊/⋉ are stripped from the output
+    before comparison with the reference evaluator (which brackets internally).
+    """
+    fst = compile_rule(rule, ALPHABET)
+    dir_r = rule.Dir == "R"
+    for inp in inputs:
+        ref = _eval_ref(rule, inp)
+        bracketed = ["⋊"] + inp + ["⋉"]
+        if dir_r:
+            raw = list(reversed(_transduce(fst, list(reversed(bracketed)))))
+        else:
+            raw = _transduce(fst, bracketed)
+        got = [s for s in raw if s not in ("⋊", "⋉")]
         assert got == ref, (
             f"Mismatch on input {inp!r}: FST={got!r}, ref={ref!r}"
         )
@@ -525,3 +546,93 @@ def test_compile_error_n1_m2():
     )
     with pytest.raises(CompileError):
         compile_rule(rule, ALPHABET)
+
+
+# ---------------------------------------------------------------------------
+# Boundary rules — BOS/EOS in Inr or Trm
+# ---------------------------------------------------------------------------
+
+# Rule: nasalize vowel only when it is word-initial (BOS in Inr).
+#   Inr=[[+BOS],[+voc]], Trm=[], Dir=L
+#   Out=(concat (nth 1 INR) (unify (nth 2 INR) [+nas]))
+NASALIZE_INITIAL = Rule(
+    Id="nas_initial",
+    Inr=[["+BOS"], ["+voc"]],
+    Trm=[],
+    Dir="L",
+    Out="(concat (nth 1 INR) (unify (nth 2 INR) [+nas]))",
+)
+
+# Rule: delete word-final vowel (EOS in Inr).
+#   Inr=[[+voc],[+EOS]], Trm=[], Dir=L
+#   Out=(nth 2 INR)
+DELETE_FINAL_VOC = Rule(
+    Id="del_final_voc",
+    Inr=[["+voc"], ["+EOS"]],
+    Trm=[],
+    Dir="L",
+    Out="(nth 2 INR)",
+)
+
+# Rule: nasalize vowel when nearest left trigger is BOS (Trm=[+BOS], Dir=L).
+#   This fires on every vowel since BOS is always reachable to the left.
+NASALIZE_BOS_TRIGGER = Rule(
+    Id="nas_bos_trm",
+    Inr=[["+voc"]],
+    Trm=[["+BOS"]],
+    Dir="L",
+    Out="(unify (nth 1 INR) [+nas])",
+)
+
+# Rule: nasalize vowel when nearest right trigger is EOS (Trm=[+EOS], Dir=R).
+#   Fires on every vowel since EOS is always reachable to the right.
+NASALIZE_EOS_TRIGGER = Rule(
+    Id="nas_eos_trm",
+    Inr=[["+voc"]],
+    Trm=[["+EOS"]],
+    Dir="R",
+    Out="(unify (nth 1 INR) [+nas])",
+)
+
+
+def test_boundary_nasalize_initial_only():
+    # Only the word-initial vowel is nasalized; non-initial vowels are unchanged.
+    _assert_agrees_bounded(NASALIZE_INITIAL, [
+        _segs("a b"),        # a is initial → nasalized
+        _segs("b a"),        # a is not initial → unchanged
+        _segs("a b a"),      # only first a nasalized
+        _segs("b m p"),      # no vowel → unchanged
+        [],                  # empty word
+    ])
+
+
+def test_boundary_delete_final_vowel():
+    # Word-final vowel is deleted; non-final vowels and final consonants unchanged.
+    _assert_agrees_bounded(DELETE_FINAL_VOC, [
+        _segs("b a"),        # final a deleted → [b]
+        _segs("a b"),        # final b is consonant → unchanged
+        _segs("a b a"),      # final a deleted → [a, b]
+        _segs("a"),          # single vowel deleted → []
+        _segs("b m"),        # no vowel → unchanged
+        [],
+    ])
+
+
+def test_boundary_bos_trigger_nasalizes_all_vowels():
+    # BOS trigger (Dir=L): every vowel has BOS to its left → all nasalized.
+    _assert_agrees_bounded(NASALIZE_BOS_TRIGGER, [
+        _segs("a b a"),
+        _segs("b a m"),
+        _segs("b m p"),      # no vowels → unchanged
+        [],
+    ])
+
+
+def test_boundary_eos_trigger_nasalizes_all_vowels():
+    # EOS trigger (Dir=R): every vowel has EOS to its right → all nasalized.
+    _assert_agrees_bounded(NASALIZE_EOS_TRIGGER, [
+        _segs("a b a"),
+        _segs("m a b"),
+        _segs("b m p"),
+        [],
+    ])
