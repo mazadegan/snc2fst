@@ -714,22 +714,23 @@ def compile_cmd(config_file, out_dir, fmt, max_arcs, no_optimize, verbose):
 
     # Compile each rule with its effective input alphabet
     fsts: list[pynini.Fst] = []
-    for rule, alphabet in zip(config.rules, alphabets):
-        click.echo(f"  Compiling {rule.Id} ...")
-        try:
-            fst = compile_rule(rule, alphabet)
-        except CompileError as e:
-            die(f"Rule '{rule.Id}': {e}", e)
-        except Exception as e:
-            die(f"Rule '{rule.Id}': unexpected error during compilation: {e}", e)
-
-        if not no_optimize:
+    pairs = list(zip(config.rules, alphabets))
+    with click.progressbar(pairs, label="Compiling rules", item_show_func=lambda p: f"  {p[0].Id}" if p else "") as bar:
+        for rule, alphabet in bar:
             try:
-                pynini.optimize(fst)
+                fst = compile_rule(rule, alphabet)
+            except CompileError as e:
+                die(f"Rule '{rule.Id}': {e}", e)
             except Exception as e:
-                die(f"Rule '{rule.Id}': optimization failed: {e}", e)
+                die(f"Rule '{rule.Id}': unexpected error during compilation: {e}", e)
 
-        fsts.append(fst)
+            if not no_optimize:
+                try:
+                    pynini.optimize(fst)
+                except Exception as e:
+                    die(f"Rule '{rule.Id}': optimization failed: {e}", e)
+
+            fsts.append(fst)
 
     # Create output directory
     try:
