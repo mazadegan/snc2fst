@@ -78,6 +78,31 @@ def _expand_alphabet(
     return result
 
 
+def _matching_combos(
+    spec_seq: list,
+    ext: dict[str, Segment],
+    dir_r: bool,
+) -> list[list[Segment]]:
+    """Return all segment sequences from ext that model spec_seq.
+
+    Instead of generating all |Σ|^n combinations and filtering, this builds
+    the cross-product position-by-position: for each position i, only segments
+    that match spec_seq[i] are considered.  For Dir=R rules the spec is applied
+    in reverse order (rightmost position first) to match the reversed-input
+    encoding used by the FST.
+
+    For an empty spec (Trm=[[]]), the single empty spec matches any segment,
+    so all segments are included at that position.
+    """
+    segs = list(ext.values())
+    specs = list(reversed(spec_seq)) if dir_r else list(spec_seq)
+    per_position = [
+        [s for s in segs if operations.in_class(s, spec)]
+        for spec in specs
+    ]
+    return [list(combo) for combo in iproduct(*per_position)]
+
+
 def _rule_output_segs(
     rule: Rule,
     out_ast,
@@ -85,23 +110,19 @@ def _rule_output_segs(
 ) -> list[Segment]:
     """Enumerate every segment Out can produce for the given rule and alphabet."""
     dir_r = rule.Dir == "R"
-    n, m = len(rule.Inr), len(rule.Trm)
+    m = len(rule.Trm)
     ext = _extended_alphabet(alphabet)
-    seg_list = list(ext.values())
     produced: list[Segment] = []
 
     if m == 0:
-        for combo in iproduct(seg_list, repeat=n):
-            check = list(reversed(combo)) if dir_r else list(combo)
-            if operations.models(check, rule.Inr):
-                raw = evaluate(out_ast, check, [], alphabet)
-                produced += [raw] if isinstance(raw, dict) else list(raw)
+        for combo in _matching_combos(rule.Inr, ext, dir_r):
+            check = list(reversed(combo)) if dir_r else combo
+            raw = evaluate(out_ast, check, [], alphabet)
+            produced += [raw] if isinstance(raw, dict) else list(raw)
     else:  # n=1, m=1
-        inr_segs = [s for s in seg_list if operations.models([s], rule.Inr)]
-        trm_segs = [s for s in seg_list if operations.models([s], rule.Trm)]
-        for x_seg in inr_segs:
-            for sigma_seg in trm_segs:
-                raw = evaluate(out_ast, [x_seg], [sigma_seg], alphabet)
+        for inr_combo in _matching_combos(rule.Inr, ext, False):
+            for trm_combo in _matching_combos(rule.Trm, ext, False):
+                raw = evaluate(out_ast, inr_combo, trm_combo, alphabet)
                 produced += [raw] if isinstance(raw, dict) else list(raw)
 
     return produced
@@ -171,12 +192,11 @@ def predict_arcs(
         s_total = sum(sigma ** k for k in range(n))
         base = (sigma + 1) * s_total - 1
         extra = 0
-        for combo in iproduct(seg_list, repeat=n):
-            check = list(reversed(combo)) if dir_r else list(combo)
-            if operations.models(check, rule.Inr):
-                raw = evaluate(out_ast, check, [], alphabet)
-                k = 1 if isinstance(raw, dict) else len(list(raw))
-                extra += max(0, k - 1)
+        for combo in _matching_combos(rule.Inr, ext, dir_r):
+            check = list(reversed(combo)) if dir_r else combo
+            raw = evaluate(out_ast, check, [], alphabet)
+            k = 1 if isinstance(raw, dict) else len(list(raw))
+            extra += max(0, k - 1)
         return base + extra
 
 
