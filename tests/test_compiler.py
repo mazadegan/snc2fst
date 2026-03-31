@@ -46,7 +46,6 @@ ALPHABET = {
 # ---------------------------------------------------------------------------
 
 
-
 def _segs(word_str: str) -> list[str]:
     """Tokenize a space-separated segment string."""
     return word_str.split()
@@ -91,7 +90,6 @@ def _assert_agrees_bounded(rule: Rule, inputs: list[list[str]]) -> None:
 # n=1, m=1, Dir=L  — nasalization before nasal
 #
 # Rule: [+voc] → [+nas] / __ [+nas]
-# Inr=[+voc], Trm=[+nas], Dir=L, Out=(unify (nth 1 INR) [+nas])
 # ---------------------------------------------------------------------------
 
 NASAL_L = Rule(
@@ -99,17 +97,15 @@ NASAL_L = Rule(
     Inr=[["+voc"]],
     Trm=[["+nas"]],
     Dir="L",
-    Out="(unify (nth 1 INR) [+nas])",
+    Out="(unify INR[1] {+nas})",
 )
 
 
 def test_nasal_l_no_trigger():
-    # No nasal in input — vowel unchanged
     _assert_agrees(NASAL_L, [_segs("a b a")])
 
 
 def test_nasal_l_single():
-    # a before m: a → nasalized-a (a+nas = a with +nas, but a has -nas, so unify adds +nas)
     _assert_agrees(NASAL_L, [_segs("a m")])
 
 
@@ -130,7 +126,6 @@ def test_nasal_l_match_at_start():
 
 
 def test_nasal_l_trigger_at_start():
-    # Nasal first, then vowel — vowel has no nasal to its left
     _assert_agrees(NASAL_L, [_segs("m a")])
 
 
@@ -142,7 +137,6 @@ def test_nasal_l_only_trigger():
 # n=1, m=1, Dir=R  — nasalization after nasal (trigger to the right)
 #
 # Rule: [+voc] → [+nas] / [+nas] __
-# Inr=[+voc], Trm=[+nas], Dir=R, Out=(unify (nth 1 INR) [+nas])
 # ---------------------------------------------------------------------------
 
 NASAL_R = Rule(
@@ -150,7 +144,7 @@ NASAL_R = Rule(
     Inr=[["+voc"]],
     Trm=[["+nas"]],
     Dir="R",
-    Out="(unify (nth 1 INR) [+nas])",
+    Out="(unify INR[1] {+nas})",
 )
 
 
@@ -163,7 +157,6 @@ def test_nasal_r_no_trigger():
 
 
 def test_nasal_r_trigger_after():
-    # Nasal follows — vowel unchanged (trigger is to the left, not right)
     _assert_agrees(NASAL_R, [_segs("a m")])
 
 
@@ -175,8 +168,6 @@ def test_nasal_r_multiple():
 # n=1, m=1 — target is also a potential trigger (harmony spread)
 #
 # Rule: [-voc] → [+lab] / __ [+lab]
-# A non-labial consonant becomes labial when immediately before a labial.
-# Inr=[-voc], Trm=[+lab], Dir=L, Out=(unify (nth 1 INR) [+lab])
 # ---------------------------------------------------------------------------
 
 LAB_HARMONY = Rule(
@@ -184,17 +175,15 @@ LAB_HARMONY = Rule(
     Inr=[["-voc"]],
     Trm=[["+lab"]],
     Dir="L",
-    Out="(unify (nth 1 INR) [+lab])",
+    Out="(unify INR[1] {+lab})",
 )
 
 
 def test_lab_harmony_single():
-    # p before b: p → b (p gains +lab)
     _assert_agrees(LAB_HARMONY, [_segs("p b")])
 
 
 def test_lab_harmony_trigger_is_also_target():
-    # b is both Inr and Trm; reading b while already in trigger state → self-retrigger
     _assert_agrees(LAB_HARMONY, [_segs("n b b")])
 
 
@@ -210,7 +199,6 @@ def test_lab_harmony_no_trigger():
 # n=1, m=0  — unconditional nasalization of labials
 #
 # Rule: [+lab] → [+nas] / (unconditionally)
-# Inr=[+lab], Trm=[], Dir=L, Out=(unify (nth 1 INR) [+nas])
 # ---------------------------------------------------------------------------
 
 NASALIZE_LAB = Rule(
@@ -218,12 +206,11 @@ NASALIZE_LAB = Rule(
     Inr=[["+lab"]],
     Trm=[],
     Dir="L",
-    Out="(unify (nth 1 INR) [+nas])",
+    Out="(unify INR[1] {+nas})",
 )
 
 
 def test_nasalize_lab_single():
-    # b → m  (b gains +nas, becoming m)
     _assert_agrees(NASALIZE_LAB, [_segs("b")])
 
 
@@ -246,9 +233,7 @@ def test_nasalize_lab_edges():
 # ---------------------------------------------------------------------------
 # n=2, m=0, Dir=L — metathesis: swap adjacent labials
 #
-# Rule: [+lab][-voc] [−lab][-voc] → swap
-# Inr=[[+lab][-voc], [-lab][-voc]], Trm=[], Dir=L
-# Out=(concat (nth 2 INR) (nth 1 INR))
+# Rule: [+lab][-voc] [-lab][-voc] → swap
 # ---------------------------------------------------------------------------
 
 METATHESIS_L = Rule(
@@ -256,17 +241,15 @@ METATHESIS_L = Rule(
     Inr=[["+lab", "-voc"], ["-lab", "-voc"]],
     Trm=[],
     Dir="L",
-    Out="(concat (nth 2 INR) (nth 1 INR))",
+    Out="(INR[2] INR[1])",
 )
 
 
 def test_metathesis_l_single():
-    # b n → n b
     _assert_agrees(METATHESIS_L, [_segs("b n")])
 
 
 def test_metathesis_l_no_match():
-    # n b doesn't match [+lab][-lab] (n is -lab)
     _assert_agrees(METATHESIS_L, [_segs("n b")])
 
 
@@ -275,12 +258,10 @@ def test_metathesis_l_with_context():
 
 
 def test_metathesis_l_greedy():
-    # bnn: b+n match first, leaving n; no second match
     _assert_agrees(METATHESIS_L, [_segs("b n n")])
 
 
 def test_metathesis_l_non_overlapping():
-    # b n b n — two non-overlapping matches
     _assert_agrees(METATHESIS_L, [_segs("b n b n")])
 
 
@@ -293,7 +274,7 @@ METATHESIS_R = Rule(
     Inr=[["+lab", "-voc"], ["-lab", "-voc"]],
     Trm=[],
     Dir="R",
-    Out="(concat (nth 2 INR) (nth 1 INR))",
+    Out="(INR[2] INR[1])",
 )
 
 
@@ -302,12 +283,10 @@ def test_metathesis_r_single():
 
 
 def test_metathesis_r_scan_direction():
-    # b n n: Dir=R scans right-to-left, matches the rightmost b+n first
     _assert_agrees(METATHESIS_R, [_segs("b n n")])
 
 
 def test_metathesis_r_agrees_with_l_when_unambiguous():
-    # Single match — both directions agree
     _assert_agrees(METATHESIS_R, [_segs("a b n a")])
 
 
@@ -315,8 +294,6 @@ def test_metathesis_r_agrees_with_l_when_unambiguous():
 # n=2, m=0  — epenthesis: insert 'p' between two consecutive nasals
 #
 # Rule: [+nas][+nas] → [+nas] p [+nas]
-# Inr=[[+nas],[+nas]], Trm=[], Dir=L
-# Out=(concat (nth 1 INR) 'p (nth 2 INR))
 # ---------------------------------------------------------------------------
 
 EPENTHESIS = Rule(
@@ -324,12 +301,11 @@ EPENTHESIS = Rule(
     Inr=[["+nas"], ["+nas"]],
     Trm=[],
     Dir="L",
-    Out="(concat (nth 1 INR) 'p (nth 2 INR))",
+    Out="(INR[1] &p INR[2])",
 )
 
 
 def test_epenthesis_single():
-    # m n → m p n
     _assert_agrees(EPENTHESIS, [_segs("m n")])
 
 
@@ -346,7 +322,6 @@ def test_epenthesis_with_context():
 
 
 def test_epenthesis_greedy():
-    # m m m: greedy L matches m+m first → m p m, remaining m is unbuffered
     _assert_agrees(EPENTHESIS, [_segs("m m m")])
 
 
@@ -383,19 +358,15 @@ def _assert_chain(rules: list[Rule], inputs: list[list[str]]) -> None:
         )
 
 
-# Dir=L then Dir=L: nasalize vowels before nasals, then labielize nasals
-# Rule 1: [+voc] → [+nas] / __ [+nas]  (Dir=L)
-# Rule 2: [+nas] → [+lab] / __ [+lab]  (Dir=L, unconditional labialization of nasals)
 _CHAIN_LL = [
     Rule(Id="r1", Inr=[["+voc"]], Trm=[["+nas"]], Dir="L",
-         Out="(unify (nth 1 INR) [+nas])"),
+         Out="(unify INR[1] {+nas})"),
     Rule(Id="r2", Inr=[["+nas"]], Trm=[], Dir="L",
-         Out="(unify (nth 1 INR) [+lab])"),
+         Out="(unify INR[1] {+lab})"),
 ]
 
 
 def test_chain_ll_basic():
-    # a m → nasalized-a m → nasalized-a m-with-lab (m already +lab)
     _assert_chain(_CHAIN_LL, [_segs("a m"), _segs("a n"), _segs("b a m")])
 
 
@@ -404,17 +375,14 @@ def test_chain_ll_no_trigger():
 
 
 def test_chain_ll_feed():
-    # r1 nasalizes 'a' before 'n'; r2 then labializes that nasalized-a
-    # (nasalized-a has +nas so r2 fires on it)
     _assert_chain(_CHAIN_LL, [_segs("a n b"), _segs("b a n")])
 
 
-# Dir=R then Dir=R: two right-to-left rules in sequence
 _CHAIN_RR = [
     Rule(Id="r1", Inr=[["+voc"]], Trm=[["+nas"]], Dir="R",
-         Out="(unify (nth 1 INR) [+nas])"),
+         Out="(unify INR[1] {+nas})"),
     Rule(Id="r2", Inr=[["+nas"]], Trm=[], Dir="R",
-         Out="(unify (nth 1 INR) [+lab])"),
+         Out="(unify INR[1] {+lab})"),
 ]
 
 
@@ -426,31 +394,27 @@ def test_chain_rr_no_trigger():
     _assert_chain(_CHAIN_RR, [_segs("a b p"), []])
 
 
-# Dir=L then Dir=R: nasalize before nasal (L), then metathesis right-to-left (R)
 _CHAIN_LR = [
     Rule(Id="r1", Inr=[["+voc"]], Trm=[["+nas"]], Dir="L",
-         Out="(unify (nth 1 INR) [+nas])"),
+         Out="(unify INR[1] {+nas})"),
     Rule(Id="r2", Inr=[["+lab", "-voc"], ["-lab", "-voc"]], Trm=[], Dir="R",
-         Out="(concat (nth 2 INR) (nth 1 INR))"),
+         Out="(INR[2] INR[1])"),
 ]
 
 
 def test_chain_lr_no_interaction():
-    # No segment is both a vowel-before-nasal and a metathesis target
     _assert_chain(_CHAIN_LR, [_segs("a m b n"), _segs("b n p")])
 
 
 def test_chain_lr_sequential():
-    # r1 fires on 'a' before 'm', r2 sees the result and may metathesise
     _assert_chain(_CHAIN_LR, [_segs("b n a m"), _segs("a m b n p")])
 
 
-# Dir=R then Dir=L: metathesis right-to-left, then nasalize before nasal (L)
 _CHAIN_RL = [
     Rule(Id="r1", Inr=[["+lab", "-voc"], ["-lab", "-voc"]], Trm=[], Dir="R",
-         Out="(concat (nth 2 INR) (nth 1 INR))"),
+         Out="(INR[2] INR[1])"),
     Rule(Id="r2", Inr=[["+voc"]], Trm=[["+nas"]], Dir="L",
-         Out="(unify (nth 1 INR) [+nas])"),
+         Out="(unify INR[1] {+nas})"),
 ]
 
 
@@ -490,84 +454,70 @@ def test_compile_error_n1_m2():
 # Boundary rules — BOS/EOS in Inr or Trm
 # ---------------------------------------------------------------------------
 
-# Rule: nasalize vowel only when it is word-initial (BOS in Inr).
-#   Inr=[[+BOS],[+voc]], Trm=[], Dir=L
-#   Out=(concat (nth 1 INR) (unify (nth 2 INR) [+nas]))
 NASALIZE_INITIAL = Rule(
     Id="nas_initial",
     Inr=[["+BOS"], ["+voc"]],
     Trm=[],
     Dir="L",
-    Out="(concat (nth 1 INR) (unify (nth 2 INR) [+nas]))",
+    Out="(INR[1] (unify INR[2] {+nas}))",
 )
 
-# Rule: delete word-final vowel (EOS in Inr).
-#   Inr=[[+voc],[+EOS]], Trm=[], Dir=L
-#   Out=(nth 2 INR)
 DELETE_FINAL_VOC = Rule(
     Id="del_final_voc",
     Inr=[["+voc"], ["+EOS"]],
     Trm=[],
     Dir="L",
-    Out="(nth 2 INR)",
+    Out="INR[2]",
 )
 
-# Rule: nasalize vowel when nearest left trigger is BOS (Trm=[+BOS], Dir=L).
-#   This fires on every vowel since BOS is always reachable to the left.
 NASALIZE_BOS_TRIGGER = Rule(
     Id="nas_bos_trm",
     Inr=[["+voc"]],
     Trm=[["+BOS"]],
     Dir="L",
-    Out="(unify (nth 1 INR) [+nas])",
+    Out="(unify INR[1] {+nas})",
 )
 
-# Rule: nasalize vowel when nearest right trigger is EOS (Trm=[+EOS], Dir=R).
-#   Fires on every vowel since EOS is always reachable to the right.
 NASALIZE_EOS_TRIGGER = Rule(
     Id="nas_eos_trm",
     Inr=[["+voc"]],
     Trm=[["+EOS"]],
     Dir="R",
-    Out="(unify (nth 1 INR) [+nas])",
+    Out="(unify INR[1] {+nas})",
 )
 
 
 def test_boundary_nasalize_initial_only():
-    # Only the word-initial vowel is nasalized; non-initial vowels are unchanged.
     _assert_agrees_bounded(NASALIZE_INITIAL, [
-        _segs("a b"),        # a is initial → nasalized
-        _segs("b a"),        # a is not initial → unchanged
-        _segs("a b a"),      # only first a nasalized
-        _segs("b m p"),      # no vowel → unchanged
-        [],                  # empty word
+        _segs("a b"),
+        _segs("b a"),
+        _segs("a b a"),
+        _segs("b m p"),
+        [],
     ])
 
 
 def test_boundary_delete_final_vowel():
-    # Word-final vowel is deleted; non-final vowels and final consonants unchanged.
     _assert_agrees_bounded(DELETE_FINAL_VOC, [
-        _segs("b a"),        # final a deleted → [b]
-        _segs("a b"),        # final b is consonant → unchanged
-        _segs("a b a"),      # final a deleted → [a, b]
-        _segs("a"),          # single vowel deleted → []
-        _segs("b m"),        # no vowel → unchanged
+        _segs("b a"),
+        _segs("a b"),
+        _segs("a b a"),
+        _segs("a"),
+        _segs("b m"),
         [],
     ])
 
 
 def test_boundary_bos_trigger_nasalizes_all_vowels():
-    # BOS trigger (Dir=L): every vowel has BOS to its left → all nasalized.
     _assert_agrees_bounded(NASALIZE_BOS_TRIGGER, [
         _segs("a b a"),
         _segs("b a m"),
-        _segs("b m p"),      # no vowels → unchanged
+        _segs("b m p"),
         [],
     ])
 
 
 def test_boundary_eos_trigger_nasalizes_all_vowels():
-    # EOS trigger (Dir=R): every vowel has EOS to its right → all nasalized.
     _assert_agrees_bounded(NASALIZE_EOS_TRIGGER, [
         _segs("a b a"),
         _segs("m a b"),

@@ -13,4 +13,4 @@ Id = "R_0"
 Inr = [["-F2"]]
 Trm = [["+F1"]]
 Dir = "L"
-Out = "(concat (unify (nth 1 INR) [+F1]))"
+Out = "(unify INR[1] {+F1})"

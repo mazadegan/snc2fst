@@ -13,13 +13,7 @@ Id = "R1a"
 Dir = "L"
 Inr = [["-Labial", "+Strident"], ["-Syllabic", "+Strident"]]
 Trm = []
-Out = """
-(concat
-    (nth 1 INR)
-    'ə
-    (nth 2 INR)
-)
-"""
+Out = "(INR[1] &ə INR[2])"
 
 # R1b: Schwa epenthesis after distributed coronals (ʃ, ʒ)
 [[rules]]
@@ -27,7 +21,7 @@ Id = "R1b"
 Dir = "L"
 Inr = [["+Coronal", "+Distributed"], ["-Syllabic", "+Strident"]]
 Trm = []
-Out = "(concat (nth 1 INR) 'ə (nth 2 INR))"
+Out = "(INR[1] &ə INR[2])"
 
 # R2: Voicing harmony
 [[rules]]
@@ -35,4 +29,4 @@ Id = "R2"
 Dir = "L"
 Inr = [["-Syllabic"]]
 Trm = [[]]
-Out = "(unify (nth 1 INR) (project (nth 1 TRM) [Voice]))"
+Out = "(unify INR[1] (proj TRM[1] (Voice)))"

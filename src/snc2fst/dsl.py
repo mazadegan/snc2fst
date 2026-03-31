@@ -10,13 +10,13 @@ import re
 from snc2fst import ast
 
 _OPERATORS = frozenset({
-    "nth", "in?", "models?", "if",
-    "unify", "subtract", "project", "concat",
+    "in?", "models?", "if",
+    "unify", "subtract", "proj",
 })
 
 _TOKEN_RE = re.compile(r"""
     (?:\s+|;[^\n]*)       # whitespace and line comments — skip
-    |([()[\]'])           # punctuation
+    |([()[\]{}&,])        # punctuation
     |([+\-])              # sign
     |([0-9]+)             # integer
     |([^\W\d_][^\W_]*\??) # name, keyword, or operator (Unicode letters + optional ?)
@@ -72,38 +72,73 @@ class _Parser:
         if tok is None:
             raise ParseError("Unexpected end of input")
         if tok == "(":
-            return self._parse_operation()
+            return self._parse_paren()
         if tok == "[":
             return self._parse_bracket()
-        if tok == "'":
+        if tok == "{":
+            return self._parse_feature_bundle()
+        if tok == "&":
             return self._parse_symbol()
         if tok == "INR":
             self.consume()
-            return ast.Inr()
+            return self._maybe_index(ast.Inr())
         if tok == "TRM":
             self.consume()
-            return ast.Trm()
+            return self._maybe_index(ast.Trm())
         if re.fullmatch(r"[0-9]+", tok):
             self.consume()
             return ast.Integer(int(tok))
         raise ParseError(f"Unexpected token: {tok!r}")
 
-    def _parse_operation(self) -> ast.Expr:
+    def _maybe_index(self, seq: ast.Expr) -> ast.Expr:
+        """If the next token is '[' followed by an integer, parse as INR[N]/TRM[N]."""
+        if self.peek() != "[":
+            return seq
+        # Peek two tokens ahead to distinguish INR[1] from INR used before a bracket expr
+        saved = self.pos
+        self.consume()  # consume '['
+        tok = self.peek()
+        if tok is not None and re.fullmatch(r"[0-9]+", tok):
+            n = int(self.consume())
+            self.expect("]")
+            return ast.Nth(ast.Integer(n), seq)
+        # Not an index — restore position and return bare seq
+        self.pos = saved
+        return seq
+
+    def _parse_paren(self) -> ast.Expr:
         self.expect("(")
         op = self.peek()
-        if op not in _OPERATORS:
-            raise ParseError(
-                f"Unknown operator: {op!r}. "
-                f"Expected one of: {sorted(_OPERATORS)}"
-            )
-        self.consume()
+        if op in _OPERATORS:
+            self.consume()
+            args = []
+            if op == "proj":
+                # (proj SEGMENT (F G ...))
+                if self.peek() is None or self.peek() == ")":
+                    raise ParseError("'proj' requires 2 arguments, got 0")
+                args.append(self.parse_expr())
+                if self.peek() != "(":
+                    raise ParseError(
+                        f"'proj': argument 2 must be a feature name list e.g. (Voice Back)"
+                    )
+                args.append(self._parse_proj_names())
+            else:
+                while self.peek() != ")":
+                    if self.peek() is None:
+                        raise ParseError(f"Unclosed '(' for operator '{op}'")
+                    args.append(self.parse_expr())
+            self.expect(")")
+            return self._make_node(op, args)
+        # Bare parens = implicit concat
         args = []
         while self.peek() != ")":
             if self.peek() is None:
-                raise ParseError(f"Unclosed '(' for operator '{op}'")
+                raise ParseError("Unclosed '(' in implicit concat sequence")
             args.append(self.parse_expr())
         self.expect(")")
-        return self._make_node(op, args)
+        if not args:
+            raise ParseError("Empty parentheses — implicit concat requires at least 1 element")
+        return ast.Concat(args=args)
 
     def _make_node(self, op: str, args: list) -> ast.Expr:
         def check_argc(n: int):
@@ -117,17 +152,13 @@ class _Parser:
                 raise ParseError(f"'{op}': argument {i + 1} must be {label}")
 
         match op:
-            case "nth":
-                check_argc(2)
-                check_type(0, ast.Integer, "an integer index")
-                return ast.Nth(index=args[0], sequence=args[1])
             case "in?":
                 check_argc(2)
-                check_type(1, ast.FeatureSpec, "a feature spec e.g. [+F -G]")
-                return ast.InClass(segment=args[0], spec=args[1])
+                check_type(1, ast.NcSequence, "a natural class e.g. [{+F -G}]")
+                return ast.InClass(segment=args[0], spec=args[1].specs[0])
             case "models?":
                 check_argc(2)
-                check_type(1, ast.NcSequence, "a NC sequence e.g. [[+F] [-G]]")
+                check_type(1, ast.NcSequence, "a NC sequence e.g. [{+F} {-G}]")
                 return ast.Models(sequence=args[0], nc_seq=args[1])
             case "if":
                 check_argc(3)
@@ -136,75 +167,88 @@ class _Parser:
                 check_argc(2)
                 if isinstance(args[1], (ast.FeatureNames, ast.NcSequence)):
                     raise ParseError(
-                        f"'unify': argument 2 must be a feature spec e.g. [+F -G]"
-                        f" or a segment expression"
+                        "'unify': argument 2 must be a feature bundle e.g. {+F -G}"
+                        " or a segment expression"
                     )
                 return ast.Unify(segment=args[0], features=args[1])
             case "subtract":
                 check_argc(2)
-                check_type(1, ast.FeatureSpec, "a feature spec e.g. [+F -G]")
+                check_type(1, ast.FeatureSpec, "a feature bundle e.g. {+F -G}")
                 return ast.Subtract(segment=args[0], features=args[1])
-            case "project":
+            case "proj":
                 check_argc(2)
-                check_type(1, ast.FeatureNames, "a feature name list e.g. [F G]")
+                check_type(1, ast.FeatureNames, "a feature name list e.g. (F G)")
                 return ast.Project(segment=args[0], names=args[1])
-            case "concat":
-                if not args:
-                    raise ParseError("'concat' requires at least 1 argument")
-                return ast.Concat(args=args)
 
-    def _parse_bracket(self) -> ast.FeatureSpec | ast.FeatureNames | ast.NcSequence:
+    def _parse_feature_bundle(self) -> ast.FeatureSpec:
+        """Parse {+F -G ...} — a feature bundle."""
+        self.expect("{")
+        features = []
+        while self.peek() != "}":
+            if self.peek() is None:
+                raise ParseError("Unclosed '{'")
+            tok = self.peek()
+            if tok == ",":
+                self.consume()
+                continue
+            if tok not in ("+", "-"):
+                raise ParseError(
+                    f"Expected '+' or '-' in feature bundle, got {tok!r}"
+                )
+            sign = self.consume()
+            name = self.peek()
+            if name is None or not re.fullmatch(r"[^\W\d_][^\W_]*", name):
+                raise ParseError(
+                    f"Expected feature name after '{sign}', got {name!r}"
+                )
+            self.consume()
+            features.append(ast.ValuedFeature(sign=sign, name=name))
+        self.expect("}")
+        return ast.FeatureSpec(features=features)
+
+    def _parse_bracket(self) -> ast.NcSequence:
+        """Parse [{+F} {-G} ...] — a natural class sequence."""
         self.expect("[")
-        items = []
+        specs = []
         while self.peek() != "]":
             if self.peek() is None:
                 raise ParseError("Unclosed '['")
             tok = self.peek()
-            if tok in ("+", "-"):
-                sign = self.consume()
-                name = self.peek()
-                if name is None or not re.fullmatch(r"[^\W\d_][^\W_]*", name):
-                    raise ParseError(
-                        f"Expected feature name after '{sign}', got {name!r}"
-                    )
+            if tok == ",":
                 self.consume()
-                items.append(ast.ValuedFeature(sign=sign, name=name))
-            elif tok == "[":
-                inner = self._parse_bracket()
-                if not isinstance(inner, ast.FeatureSpec):
-                    raise ParseError(
-                        "Nested brackets must contain valued features: [[+F -G] ...]"
-                    )
-                items.append(inner)
-            elif re.fullmatch(r"[^\W\d_][^\W_]*", tok):
-                items.append(self.consume())
-            else:
-                raise ParseError(f"Unexpected token in bracket: {tok!r}")
+                continue
+            if tok != "{":
+                raise ParseError(
+                    f"Expected '{{' inside natural class sequence, got {tok!r}. "
+                    "Use [{+F -G}] for a natural class."
+                )
+            specs.append(self._parse_feature_bundle())
         self.expect("]")
-        return self._classify_bracket(items)
+        return ast.NcSequence(specs=specs)
 
-    def _classify_bracket(
-        self, items: list
-    ) -> ast.FeatureSpec | ast.FeatureNames | ast.NcSequence:
-        if not items:
-            return ast.FeatureSpec(features=[])
-        if all(isinstance(i, ast.ValuedFeature) for i in items):
-            return ast.FeatureSpec(features=items)
-        if all(isinstance(i, str) for i in items):
-            return ast.FeatureNames(names=items)
-        if all(isinstance(i, ast.FeatureSpec) for i in items):
-            return ast.NcSequence(specs=items)
-        raise ParseError(
-            "Mixed bracket contents: use [+F -G] for feature specs, "
-            "[F G] for feature name lists, or [[+F] [+G]] for NC sequences"
-        )
+    def _parse_proj_names(self) -> ast.FeatureNames:
+        """Parse (F G ...) — a list of bare feature names for proj."""
+        self.expect("(")
+        names = []
+        while self.peek() != ")":
+            if self.peek() is None:
+                raise ParseError("Unclosed '(' in feature name list")
+            tok = self.peek()
+            if not re.fullmatch(r"[^\W\d_][^\W_]*", tok):
+                raise ParseError(
+                    f"Expected feature name in proj list, got {tok!r}"
+                )
+            names.append(self.consume())
+        self.expect(")")
+        if not names:
+            raise ParseError("proj feature name list cannot be empty")
+        return ast.FeatureNames(names=names)
 
     def _parse_symbol(self) -> ast.Symbol:
-
-        self.expect("'")
+        self.expect("&")
         name = self.peek()
         if name is None or not re.fullmatch(r"[^\W\d_][^\W_]*", name):
-            raise ParseError(f"Expected segment name after \"'\", got {name!r}")
+            raise ParseError(f"Expected segment name after '&', got {name!r}")
         self.consume()
         return ast.Symbol(name=name)
 
@@ -232,16 +276,16 @@ def collect_errors(
             case ast.Nth(index=ast.Integer(value=i), sequence=seq):
                 if i < 1:
                     errors.append(
-                        f"Rule '{rule_id}': (nth {i} ...) — index must be >= 1."
+                        f"Rule '{rule_id}': INR[{i}]/TRM[{i}] — index must be >= 1."
                     )
                 elif isinstance(seq, ast.Inr) and i > inr_len:
                     errors.append(
-                        f"Rule '{rule_id}': (nth {i} INR) out of bounds"
+                        f"Rule '{rule_id}': INR[{i}] out of bounds"
                         f" — INR has length {inr_len}."
                     )
                 elif isinstance(seq, ast.Trm) and i > trm_len:
                     errors.append(
-                        f"Rule '{rule_id}': (nth {i} TRM) out of bounds"
+                        f"Rule '{rule_id}': TRM[{i}] out of bounds"
                         f" — TRM has length {trm_len}."
                     )
                 walk(seq)

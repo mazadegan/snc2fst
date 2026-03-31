@@ -13,7 +13,7 @@ Id = "R1"
 Dir = "L"
 Inr = [["+Syllabic"]]
 Trm = [["+Syllabic", "-High"]]
-Out = "(unify (nth 1 INR) (project (nth 1 TRM) [Back]))"
+Out = "(unify INR[1] (proj TRM[1] (Back)))"
 
 # R2: copy Back from the nearest preceding high round vowel
 [[rules]]
@@ -21,7 +21,7 @@ Id = "R2"
 Dir = "L"
 Inr = [["+Syllabic"]]
 Trm = [["+Syllabic", "+High", "+Round"]]
-Out = "(unify (nth 1 INR) (project (nth 1 TRM) [Back]))"
+Out = "(unify INR[1] (proj TRM[1] (Back)))"
 
 # R3: default — assign -Back when no harmony trigger is found
 [[rules]]
@@ -29,4 +29,4 @@ Id = "R3"
 Dir = "L"
 Inr = [["+Syllabic"]]
 Trm = [[]]
-Out = "(unify (nth 1 INR) [-Back])"
+Out = "(unify INR[1] {-Back})"

@@ -13,7 +13,7 @@ Dir = "R"
 Inr = [["+Lateral", "+Dorsal"]]
 Trm = [[]]
 Out = """
-  (if (in? (nth 1 TRM) [-Back])
-    (unify (subtract (nth 1 INR) [+Dorsal]) [-Dorsal])
+  (if (in? TRM[1] [{-Back}])
+    (unify (subtract INR[1] {+Dorsal}) {-Dorsal})
     INR)
 """
