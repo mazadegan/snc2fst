@@ -191,8 +191,20 @@ def init(filename, from_starter, pick_starter):
             click.echo(f"Error: '{target_file}' already exists.", err=True)
             raise click.Abort()
 
-    for target_file, source in source_files:
-        target_file.write_text(source.read_text())
+    # Read all content into memory before writing anything so that a read
+    # failure leaves no files on disk.
+    contents = [(target, source.read_text()) for target, source in source_files]
+
+    written: list[Path] = []
+    try:
+        for target_file, text in contents:
+            target_file.write_text(text)
+            written.append(target_file)
+    except Exception as e:
+        for f in written:
+            f.unlink(missing_ok=True)
+        click.echo(f"Error: failed to write '{target_file}': {e}", err=True)
+        raise click.Abort()
 
     # For new projects (no starter), run the metadata wizard and patch [meta].
     if from_starter is None:
