@@ -373,6 +373,7 @@ def validate(config_file):
 
 @main.command(name="eval")
 @click.argument("config_file", type=click.Path(exists=True, dir_okay=False))
+@click.argument("word", required=False, default=None)
 @click.option(
     "--format", "fmt",
     type=click.Choice(["txt", "latex"]),
@@ -391,9 +392,26 @@ def validate(config_file):
     default=False,
     help="Suppress alphabet warnings.",
 )
-def eval_cmd(config_file, fmt, output, no_warn):
-    """Apply grammar rules to all test cases and report results."""
+@click.option(
+    "--fst",
+    "use_fst",
+    is_flag=True,
+    default=False,
+    help="Transduce via compiled FSTs in the transducers/ directory instead of the evaluator.",
+)
+def eval_cmd(config_file, word, fmt, output, no_warn, use_fst):
+    """Apply grammar rules to test cases and report results.
+
+    If WORD is given, evaluate that single word instead of the test suite.
+    Use --fst to transduce via compiled FSTs in the transducers/ directory.
+    """
     config_path = Path(config_file)
+    input_word = word  # rename to avoid collision with loop variable
+
+    if use_fst and fmt is not None:
+        click.echo("[x] --format is not supported with --fst.", err=True)
+        raise click.Abort()
+
     v = _run_validate(config_path, verbose=False)
     if not v.ok:
         click.echo(
@@ -410,20 +428,126 @@ def eval_cmd(config_file, fmt, output, no_warn):
 
     config = v.config
     alphabet = v.alphabet
-    tests = v.tests
 
+    # ------------------------------------------------------------------
+    # FST path
+    # ------------------------------------------------------------------
+    if use_fst:
+        try:
+            import pynini
+        except ImportError:
+            click.echo("[x] pynini is not installed. Cannot use --fst.", err=True)
+            raise click.Abort()
+
+        from snc2fst.compiler import compile_rule, compute_alphabets, transduce
+
+        fst_dir = config_path.parent / "transducers"
+        missing = [
+            rule.Id for rule in config.rules
+            if not (fst_dir / f"{rule.Id}.fst").exists()
+        ]
+        if missing:
+            ids = ", ".join(missing)
+            click.echo(
+                f"[x] Compiled FSTs not found for: {ids}. "
+                f"Run 'snc compile {config_file}' first.",
+                err=True,
+            )
+            raise click.Abort()
+
+        fsts: dict[str, pynini.Fst] = {}
+        for rule in config.rules:
+            fst_path = fst_dir / f"{rule.Id}.fst"
+            syms_path = fst_dir / f"{rule.Id}.syms"
+            fst = pynini.Fst.read(str(fst_path))
+            sym = pynini.SymbolTable.read_text(str(syms_path))
+            fst.set_input_symbols(sym)
+            fst.set_output_symbols(sym)
+            fsts[rule.Id] = fst
+
+        def _apply_fst_chain(inp_str: str) -> str:
+            try:
+                tokens = tokenize(inp_str, alphabet)
+            except TokenizeError as e:
+                raise EvalError(str(e))
+            current = ["⋊"] + list(tokens) + ["⋉"]
+            for rule in config.rules:
+                current = transduce(fsts[rule.Id], rule, current)
+            stripped = [s for s in current if s not in ("⋊", "⋉")]
+            return "".join(stripped)
+
+        if input_word is not None:
+            try:
+                result = _apply_fst_chain(input_word)
+                click.echo(f"{input_word} → {result}")
+            except (EvalError, ValueError) as e:
+                click.echo(f"[x] {e}", err=True)
+                raise click.Abort()
+            return
+
+        tests = v.tests
+        click.echo("Results:")
+        passed = failed = errors = 0
+        for i, (inp_str, exp_str) in enumerate(tests, 1):
+            try:
+                result = _apply_fst_chain(inp_str)
+            except (EvalError, ValueError) as e:
+                click.echo(f"  [{i}] ERROR  {inp_str}: {e}", err=True)
+                errors += 1
+                continue
+            try:
+                exp_tokens = tokenize(exp_str, alphabet)
+            except TokenizeError as e:
+                click.echo(f"  [{i}] ERROR  {inp_str}: {e}", err=True)
+                errors += 1
+                continue
+            ok = result == "".join(exp_tokens)
+            passed += ok
+            failed += not ok
+            if ok:
+                click.echo(f"  [{i}] PASS  {inp_str} → {result}")
+            else:
+                click.echo(f"  [{i}] FAIL  {inp_str} → {result}  (expected {exp_str})")
+        total = len(tests)
+        click.echo(f"\n{passed}/{total} passed, {failed} failed, {errors} errors.")
+        return
+
+    # ------------------------------------------------------------------
+    # Evaluator path
+    # ------------------------------------------------------------------
     try:
         out_asts = {rule.Id: dsl.parse(rule.Out) for rule in config.rules}
     except dsl.ParseError as e:
         click.echo(f"[x] Failed to parse Out expression: {e}", err=True)
         raise click.Abort()
 
-    # Run every test case, collecting per-rule intermediate states.
+    def _apply_eval_chain(inp_str: str) -> "tuple[list, list[list]]":
+        inp_tokens = tokenize(inp_str, alphabet)
+        w = [dict(alphabet[t]) for t in inp_tokens]
+        states = [list(w)]
+        for rule in config.rules:
+            w = apply_rule(rule, out_asts[rule.Id], w, alphabet)
+            states.append(list(w))
+        return w, states
+
+    if input_word is not None:
+        try:
+            w, _ = _apply_eval_chain(input_word)
+            click.echo(f"{input_word} → {word_to_str(w, alphabet)}")
+        except TokenizeError as e:
+            click.echo(f"[x] {e}", err=True)
+            raise click.Abort()
+        except EvalError as e:
+            click.echo(f"[x] {e}", err=True)
+            raise click.Abort()
+        return
+
+    tests = v.tests
     click.echo("Results:")
     rule_ids = [rule.Id for rule in config.rules]
     passed = failed = errors = 0
     good_inputs: list[str] = []
-    good_states: list[list] = []   # per-test list of word states (one per rule boundary)
+    good_states: list[list] = []
     good_expected: list[list[str]] = []
 
     for i, (inp_str, exp_str) in enumerate(tests, 1):
@@ -435,18 +559,14 @@ def eval_cmd(config_file, fmt, output, no_warn):
             errors += 1
             continue
 
-        word = [dict(alphabet[t]) for t in inp_tokens]
-        states = [list(word)]
         try:
-            for rule in config.rules:
-                word = apply_rule(rule, out_asts[rule.Id], word, alphabet)
-                states.append(list(word))
+            w, states = _apply_eval_chain(inp_str)
         except EvalError as e:
             click.echo(f"  [{i}] ERROR  {inp_str}: {e}", err=True)
             errors += 1
             continue
 
-        out_tokens = tokenize(word_to_str(word, alphabet), alphabet)
+        out_tokens = tokenize(word_to_str(w, alphabet), alphabet)
         ok = out_tokens == exp_tokens
         passed += ok
         failed += not ok
@@ -456,7 +576,7 @@ def eval_cmd(config_file, fmt, output, no_warn):
         good_expected.append(exp_tokens)
 
         if fmt is None:
-            result = word_to_str(word, alphabet)
+            result = word_to_str(w, alphabet)
             if ok:
                 click.echo(f"  [{i}] PASS  {inp_str} → {result}")
             else:

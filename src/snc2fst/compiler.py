@@ -395,6 +395,55 @@ def _compile_n_m0(
 # Public API
 # ---------------------------------------------------------------------------
 
+def transduce(
+    fst: "pynini.Fst",
+    rule: Rule,
+    segments: list[str],
+) -> list[str]:
+    """Apply a compiled FST to a list of segment names, returning output names.
+
+    Handles Dir=R reversal internally — callers never need to reverse input
+    or output themselves.  Raises ValueError if the FST produces no output
+    for the given input (i.e. the input is not in the FST's domain).
+    """
+    sym = fst.input_symbols()
+    output_sym = fst.output_symbols()
+    one = pynini.Weight.one("tropical")
+
+    inp = list(reversed(segments)) if rule.Dir == "R" else segments
+
+    lin = pynini.Fst()
+    s = lin.add_state()
+    lin.set_start(s)
+    for name in inp:
+        t = lin.add_state()
+        lin.add_arc(s, pynini.Arc(sym.find(name), sym.find(name), one, t))
+        s = t
+    lin.set_final(s, one)
+
+    composed = pynini.compose(lin, fst)
+    if composed.start() == -1:
+        raise ValueError(f"FST produced no output for input {segments!r}")
+
+    result = []
+    state = composed.start()
+    seen: set[int] = set()
+    while state != -1 and state not in seen:
+        seen.add(state)
+        arcs = list(composed.arcs(state))
+        if not arcs:
+            break
+        real = [a for a in arcs if a.ilabel != 0]
+        arc = real[0] if real else arcs[0]
+        if arc.olabel != 0:
+            result.append(output_sym.find(arc.olabel))
+        state = arc.nextstate
+
+    if rule.Dir == "R":
+        result = list(reversed(result))
+    return result
+
+
 def compile_rule(rule: Rule, alphabet: dict[str, Segment]) -> pynini.Fst:
     """Compile an S&C rule to a pynini FST transducer.
 

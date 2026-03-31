@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 
-from prettytable import PrettyTable, SINGLE_BORDER, TableStyle
+from prettytable import PrettyTable, TableStyle
 
 from snc2fst.types import Segment, Word
 

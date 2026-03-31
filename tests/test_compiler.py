@@ -24,7 +24,7 @@ Natural classes used in tests:
 import pytest
 pynini = pytest.importorskip("pynini", reason="pynini not installed")
 
-from snc2fst.compiler import CompileError, compile_rule
+from snc2fst.compiler import CompileError, compile_rule, transduce
 from snc2fst.evaluator import apply_rule
 from snc2fst import dsl
 from snc2fst.models import Rule
@@ -45,43 +45,6 @@ ALPHABET = {
 # Transduction helpers
 # ---------------------------------------------------------------------------
 
-def _transduce(fst: "pynini.Fst", seg_names: list[str]) -> list[str]:
-    """Run the FST on a list of segment names; return output as list of names."""
-    sym = fst.input_symbols()
-    output_sym = fst.output_symbols()
-    one = pynini.Weight.one("tropical")
-
-    # Build linear acceptor
-    lin = pynini.Fst()
-    s = lin.add_state()
-    lin.set_start(s)
-    for name in seg_names:
-        t = lin.add_state()
-        lin.add_arc(s, pynini.Arc(sym.find(name), sym.find(name), one, t))
-        s = t
-    lin.set_final(s, one)
-
-    composed = pynini.compose(lin, fst)
-    if composed.start() == -1:
-        raise ValueError(f"FST produced no output for input {seg_names!r}")
-
-    # Greedy traversal: always prefer arcs that consume real input (ilabel != 0)
-    # over epsilon arcs (ilabel == 0, i.e. flush arcs). Epsilon arcs are only
-    # taken when no real arc is available, which is exactly end-of-input.
-    result = []
-    state = composed.start()
-    seen: set[int] = set()
-    while state != -1 and state not in seen:
-        seen.add(state)
-        arcs = list(composed.arcs(state))
-        if not arcs:
-            break
-        real = [a for a in arcs if a.ilabel != 0]
-        arc = real[0] if real else arcs[0]
-        if arc.olabel != 0:
-            result.append(output_sym.find(arc.olabel))
-        state = arc.nextstate
-    return result
 
 
 def _segs(word_str: str) -> list[str]:
@@ -101,40 +64,23 @@ def _eval_ref(rule: Rule, inp: list[str]) -> list[str]:
 
 
 def _assert_agrees(rule: Rule, inputs: list[list[str]]) -> None:
-    """Compile rule to FST and check it agrees with the reference evaluator.
-
-    For Dir=R rules, compile_rule returns the left-to-right FST T_L that
-    encodes reversed semantics.  We feed reversed input and reverse the output
-    to recover the correct surface form.
-    """
+    """Compile rule to FST and check it agrees with the reference evaluator."""
     fst = compile_rule(rule, ALPHABET)
-    dir_r = rule.Dir == "R"
     for inp in inputs:
         ref = _eval_ref(rule, inp)
-        if dir_r:
-            got = list(reversed(_transduce(fst, list(reversed(inp)))))
-        else:
-            got = _transduce(fst, inp)
+        got = transduce(fst, rule, inp)
         assert got == ref, (
             f"Mismatch on input {inp!r}: FST={got!r}, ref={ref!r}"
         )
 
 
 def _assert_agrees_bounded(rule: Rule, inputs: list[list[str]]) -> None:
-    """Like _assert_agrees but brackets input with ⋊/⋉ for boundary-aware rules.
-
-    The FST receives the bracketed sequence; ⋊/⋉ are stripped from the output
-    before comparison with the reference evaluator (which brackets internally).
-    """
+    """Like _assert_agrees but brackets input with ⋊/⋉ for boundary-aware rules."""
     fst = compile_rule(rule, ALPHABET)
-    dir_r = rule.Dir == "R"
     for inp in inputs:
         ref = _eval_ref(rule, inp)
         bracketed = ["⋊"] + inp + ["⋉"]
-        if dir_r:
-            raw = list(reversed(_transduce(fst, list(reversed(bracketed)))))
-        else:
-            raw = _transduce(fst, bracketed)
+        raw = transduce(fst, rule, bracketed)
         got = [s for s in raw if s not in ("⋊", "⋉")]
         assert got == ref, (
             f"Mismatch on input {inp!r}: FST={got!r}, ref={ref!r}"
@@ -409,21 +355,13 @@ def test_epenthesis_greedy():
 # ---------------------------------------------------------------------------
 
 def _apply_chain(rules: list[Rule], inp: list[str]) -> list[str]:
-    """Apply a sequence of rules via their FSTs, one at a time.
-
-    For Dir=R rules, feed reversed input to the left-to-right FST and
-    reverse the output, matching the semantics of compile_rule for Dir=R.
-    """
+    """Apply a sequence of rules via their FSTs, one at a time."""
     from snc2fst.compiler import compute_alphabets
     alphabets = compute_alphabets(rules, ALPHABET)
     current = inp
     for rule, alphabet in zip(rules, alphabets):
         fst = compile_rule(rule, alphabet)
-        if rule.Dir == "R":
-            got = list(reversed(_transduce(fst, list(reversed(current)))))
-        else:
-            got = _transduce(fst, current)
-        current = got
+        current = transduce(fst, rule, current)
     return current
 
 
