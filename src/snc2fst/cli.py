@@ -379,8 +379,9 @@ def validate(config_file):
     config_path = Path(config_file)
     click.echo(f"Validating project at: {config_path}")
     result = _run_validate(config_path, verbose=True)
-    if result.ok:
-        click.echo("All files valid.")
+    if not result.ok:
+        raise click.Abort()
+    click.echo("All files valid.")
 
 
 @main.command(name="eval")
