@@ -341,6 +341,24 @@ def _run_validate(config_path: Path, verbose: bool = False) -> _ValidationResult
         return result
     info("  [✓] All Out expressions are syntactically valid.")
 
+    # --- compilability check (only when meta.compilable = true) ---
+    if result.config.meta.compilable:
+        from snc2fst.compiler import CompileError, _check_compilable
+        compile_errors = []
+        for rule in result.config.rules:
+            try:
+                _check_compilable(rule)
+            except CompileError as e:
+                compile_errors.append(str(e))
+        if compile_errors:
+            error("  [x] Compilability check failed (compilable = true in [meta]):")
+            for e in compile_errors:
+                error(f"      - {e}")
+            error("      Set compilable = false in [meta] to use the evaluator only.")
+            result.ok = False
+            return result
+        info("  [✓] All rules are compilable to FSTs.")
+
     # --- tests file ---
     try:
         result.tests = load_tests(base_dir / result.config.tests_path)
@@ -690,6 +708,12 @@ def compile_cmd(config_file, out_dir, fmt, max_arcs, no_optimize, verbose):
 
     config = v.config
     base_alphabet = v.alphabet
+
+    if not config.meta.compilable:
+        die(
+            "This grammar has compilable = false in [meta]. "
+            "FST compilation is not supported for this grammar."
+        )
 
     if not config.rules:
         die("No rules defined in config.")

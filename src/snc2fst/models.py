@@ -11,6 +11,7 @@ class Meta(BaseModel):
     language: str          # ISO 639-3 preferred; 639-2 or names accepted at load time
     description: str = ""
     sources: list[str] = []
+    compilable: bool = True
 
 class Rule(BaseModel):
     Id: str

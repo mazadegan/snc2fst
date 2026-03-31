@@ -6,6 +6,7 @@ title = "Georgian lateral harmony"
 language = "kat"
 description = "Front/back alternation of the lateral /l̃/ before front vs. back vowels."
 sources = ["Kenstowicz & Kisseberth (1979), Generative Phonology, Ch. 2, Exercise 1"]
+compilable = true
 
 [[rules]]
 Id = "R1"
