@@ -1,4 +1,5 @@
 from snc2fst import ast, operations
+from snc2fst.alphabet import BOS_SEGMENT, EOS_SEGMENT
 from snc2fst.models import Rule
 from snc2fst.types import FeatureSpec, FeatureSpecSequence, Segment, Word
 
@@ -103,6 +104,27 @@ def _find_trigger(
     return None
 
 
+def _check_boundary_positions(word: Word, rule_id: str) -> None:
+    """Raise EvalError if BOS/EOS appear at illegal positions in word."""
+    for i, seg in enumerate(word):
+        if seg == BOS_SEGMENT and i != 0:
+            raise EvalError(
+                f"Rule '{rule_id}': BOS boundary ended up at position {i + 1} "
+                "(must be at position 1)."
+            )
+        if seg == EOS_SEGMENT and i != len(word) - 1:
+            raise EvalError(
+                f"Rule '{rule_id}': EOS boundary ended up at position {i + 1} "
+                f"(must be at position {len(word)})."
+            )
+    bos_count = sum(1 for s in word if s == BOS_SEGMENT)
+    eos_count = sum(1 for s in word if s == EOS_SEGMENT)
+    if bos_count > 1:
+        raise EvalError(f"Rule '{rule_id}': multiple BOS boundaries in output.")
+    if eos_count > 1:
+        raise EvalError(f"Rule '{rule_id}': multiple EOS boundaries in output.")
+
+
 def apply_rule(
     rule: Rule,
     out_ast: ast.Expr,
@@ -111,14 +133,17 @@ def apply_rule(
 ) -> Word:
     """Apply a single S&C rule to a word, returning the transformed word.
 
-    Scans left-to-right for non-overlapping target windows (INR).  For each
-    target, searches in direction Dir for the nearest window that models TRM
-    (which may be non-adjacent).  When found, OUT is evaluated and the target
-    is replaced.
+    The word is bracketed with BOS/EOS pseudo-segments before processing and
+    stripped after. Scans left-to-right for non-overlapping target windows
+    (INR). For each target, searches in direction Dir for the nearest window
+    that models TRM (which may be non-adjacent). When found, OUT is evaluated
+    and the target is replaced.
     """
+    from snc2fst.alphabet import bracket_word, strip_boundaries
+
     m = len(rule.Inr)  # target window length
     n = len(rule.Trm)  # trigger window length
-    result = list(word)
+    result = bracket_word(word)
     i = 0
     while i <= len(result) - m:
         target = result[i : i + m]
@@ -140,4 +165,5 @@ def apply_rule(
         result[i : i + m] = out
         i += len(out)
 
-    return result
+    _check_boundary_positions(result, rule.Id)
+    return strip_boundaries(result)

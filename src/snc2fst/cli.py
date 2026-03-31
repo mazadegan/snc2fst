@@ -282,7 +282,8 @@ def _run_validate(config_path: Path, verbose: bool = False) -> _ValidationResult
     if not alph_warnings:
         info("  [✓] All segments are distinguishable.")
 
-    valid_features = {f for seg in result.alphabet.values() for f in seg}
+    from snc2fst.alphabet import RESERVED_FEATURES
+    valid_features = {f for seg in result.alphabet.values() for f in seg} | RESERVED_FEATURES
 
     # --- rule features ---
     rule_errors = []

@@ -16,9 +16,12 @@ from itertools import product as iproduct
 import pynini
 
 from snc2fst import dsl, operations
+from snc2fst.alphabet import BOS_SEGMENT, EOS_SEGMENT
 from snc2fst.evaluator import evaluate
 from snc2fst.models import Rule
 from snc2fst.types import Segment
+
+_BOUNDARY_NAMES = {"⋊": BOS_SEGMENT, "⋉": EOS_SEGMENT}
 
 
 class CompileError(Exception):
@@ -184,12 +187,29 @@ def _build_sym_table(alphabet: dict[str, Segment]) -> pynini.SymbolTable:
     sym.add_symbol("<eps>", 0)
     for name in alphabet:
         sym.add_symbol(name)
+    sym.add_symbol("⋊")
+    sym.add_symbol("⋉")
     return sym
+
+
+def _add_boundary_arcs(
+    fst: pynini.Fst,
+    sym: pynini.SymbolTable,
+    state: int,
+    w,
+) -> None:
+    """Add BOS/EOS identity arcs from state back to itself."""
+    for bname in ("⋊", "⋉"):
+        bl = sym.find(bname)
+        fst.add_arc(state, pynini.Arc(bl, bl, w, state))
 
 
 def _rev_map(alphabet: dict[str, Segment]) -> dict[frozenset, str]:
     """Reverse mapping from feature-set fingerprint to segment name."""
-    return {frozenset(seg.items()): name for name, seg in alphabet.items()}
+    rmap = {frozenset(seg.items()): name for name, seg in alphabet.items()}
+    rmap[frozenset(BOS_SEGMENT.items())] = "⋊"
+    rmap[frozenset(EOS_SEGMENT.items())] = "⋉"
+    return rmap
 
 
 def _seg_name(seg: Segment, rmap: dict[frozenset, str]) -> str:
@@ -261,6 +281,9 @@ def _compile_n1_m1(
             fst.set_final(s, w)
             trm_state[name] = s
 
+    # Boundary identity arcs on q_f (and all trm states — added below)
+    _add_boundary_arcs(fst, sym, q_f, w)
+
     # Transitions from q_f: emit x unchanged, update state if x ∈ L(Trm)
     for x_name in alphabet:
         xl = sym.find(x_name)
@@ -269,6 +292,7 @@ def _compile_n1_m1(
 
     # Transitions from each q_σ
     for sigma_name, q_sigma in trm_state.items():
+        _add_boundary_arcs(fst, sym, q_sigma, w)
         sigma_seg = alphabet[sigma_name]
         for x_name, x_seg in alphabet.items():
             xl = sym.find(x_name)
@@ -318,6 +342,7 @@ def _compile_n_m0(
     while queue:
         buf = queue.popleft()
         src = get_state(buf)
+        _add_boundary_arcs(fst, sym, src, w)
 
         for x_name, x_seg in alphabet.items():
             xl = sym.find(x_name)

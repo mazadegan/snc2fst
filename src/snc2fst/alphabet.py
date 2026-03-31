@@ -4,6 +4,12 @@ from pathlib import Path
 from snc2fst.types import Segment, Word
 
 
+RESERVED_FEATURES = frozenset({"BOS", "EOS"})
+
+BOS_SEGMENT: Segment = {"BOS": "+"}
+EOS_SEGMENT: Segment = {"EOS": "+"}
+
+
 class TokenizeError(Exception):
     pass
 
@@ -35,6 +41,22 @@ def load_alphabet(path: Path) -> dict[str, Segment]:
     if duplicate_features:
         dupes = ", ".join(f"'{f}'" for f in duplicate_features)
         raise ValueError(f"Duplicate feature row(s) in alphabet: {dupes}.")
+
+    reserved_used = RESERVED_FEATURES & set(seen_features)
+    if reserved_used:
+        names = ", ".join(f"'{f}'" for f in sorted(reserved_used))
+        raise ValueError(
+            f"Reserved feature name(s) used in alphabet: {names}. "
+            "'BOS' and 'EOS' are reserved for word boundary pseudo-segments."
+        )
+
+    reserved_segs = RESERVED_FEATURES & set(segments)
+    if reserved_segs:
+        names = ", ".join(f"'{s}'" for s in sorted(reserved_segs))
+        raise ValueError(
+            f"Reserved segment name(s) used in alphabet: {names}. "
+            "'BOS' and 'EOS' are reserved for word boundary pseudo-segments."
+        )
 
     return alphabet
 
@@ -132,6 +154,16 @@ def tokenize(word_str: str, alphabet: dict[str, Segment]) -> list[str]:
     )
 
 
+def bracket_word(word: Word) -> Word:
+    """Wrap a word with BOS/EOS boundary pseudo-segments."""
+    return [dict(BOS_SEGMENT)] + list(word) + [dict(EOS_SEGMENT)]
+
+
+def strip_boundaries(word: Word) -> Word:
+    """Remove all BOS/EOS pseudo-segments from a word."""
+    return [s for s in word if s != BOS_SEGMENT and s != EOS_SEGMENT]
+
+
 def word_to_str(word: Word, alphabet: dict[str, Segment]) -> str:
     """Convert a Word back to a concatenated string of segment names.
 
@@ -143,10 +175,15 @@ def word_to_str(word: Word, alphabet: dict[str, Segment]) -> str:
     }
     parts = []
     for seg in word:
-        key = frozenset(seg.items())
-        if key in rev:
-            parts.append(rev[key])
+        if seg == BOS_SEGMENT:
+            parts.append("BOS")
+        elif seg == EOS_SEGMENT:
+            parts.append("EOS")
         else:
-            bundle = " ".join(f"{v}{f}" for f, v in sorted(seg.items()))
-            parts.append(f"[{bundle}]")
+            key = frozenset(seg.items())
+            if key in rev:
+                parts.append(rev[key])
+            else:
+                bundle = " ".join(f"{v}{f}" for f, v in sorted(seg.items()))
+                parts.append(f"[{bundle}]")
     return "".join(parts)

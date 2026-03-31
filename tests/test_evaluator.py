@@ -314,3 +314,114 @@ def test_apply_rule_conditional_else():
     # D before B (+F, -G): trigger lacks +G → else branch → INR unchanged
     result = apply_rule(CONDITIONAL, CONDITIONAL_AST, [D, B], ALPHABET)
     assert result == [D, B]
+
+
+# ---------------------------------------------------------------------------
+# apply_rule — BOS/EOS boundary pseudo-segments
+# ---------------------------------------------------------------------------
+
+from snc2fst.alphabet import BOS_SEGMENT, EOS_SEGMENT
+
+# Rule: assimilate the word-initial segment if it is -F.
+#   INR = [[+BOS], [-F]], Trm = [], Dir = L (unconditional; BOS in target window)
+WORD_INITIAL_TARGET = Rule(
+    Id="word_initial",
+    Inr=[["+BOS"], ["-F"]],
+    Trm=[],
+    Dir="L",
+    Out="(concat (nth 1 INR) (unify (subtract (nth 2 INR) [-F]) [+F]))",
+)
+WORD_INITIAL_TARGET_AST = parse(WORD_INITIAL_TARGET.Out)
+
+# Rule: assimilate -F segment to +F when the nearest left trigger is BOS
+#   (i.e. there is no non-BOS segment between it and the start of the word).
+#   INR = [[-F]], Trm = [[+BOS]], Dir = L
+WORD_INITIAL_TRIGGER = Rule(
+    Id="word_initial_trm",
+    Inr=[["-F"]],
+    Trm=[["+BOS"]],
+    Dir="L",
+    Out="(concat (unify (subtract (nth 1 INR) [-F]) [+F]))",
+)
+WORD_INITIAL_TRIGGER_AST = parse(WORD_INITIAL_TRIGGER.Out)
+
+# Rule: word-final deletion — target is [-F] immediately before EOS.
+#   INR = [[-F], [+EOS]], Trm = [], Dir = L (unconditional)
+WORD_FINAL_DELETION = Rule(
+    Id="word_final_del",
+    Inr=[["-F"], ["+EOS"]],
+    Trm=[],
+    Dir="L",
+    Out="(nth 2 INR)",
+)
+WORD_FINAL_DELETION_AST = parse(WORD_FINAL_DELETION.Out)
+
+# Rule: epenthesis before EOS — insert 'A' between last segment and EOS.
+#   INR = [[], [+EOS]], Trm = [], Dir = L (unconditional)
+EPENTHESIS_WORD_FINAL = Rule(
+    Id="epen_final",
+    Inr=[[], ["+EOS"]],
+    Trm=[],
+    Dir="L",
+    Out="(concat (nth 1 INR) 'A (nth 2 INR))",
+)
+EPENTHESIS_WORD_FINAL_AST = parse(EPENTHESIS_WORD_FINAL.Out)
+
+
+def test_apply_rule_bos_in_inr_matches_word_initial():
+    # BOS + C at the start: C is -F, window [BOS, C] matches → assimilate C
+    result = apply_rule(WORD_INITIAL_TARGET, WORD_INITIAL_TARGET_AST, [C], ALPHABET)
+    assert result == [{"F": "+", "G": "+"}]
+
+
+def test_apply_rule_bos_in_inr_no_match_non_initial():
+    # [A, C]: C is at position 1, so window [BOS, C] does not occur → unchanged
+    result = apply_rule(WORD_INITIAL_TARGET, WORD_INITIAL_TARGET_AST, [A, C], ALPHABET)
+    assert result == [A, C]
+
+
+def test_apply_rule_bos_trigger_all_minus_f_assimilated():
+    # [C, D]: both are -F; BOS is always to the left of any segment → both assimilate
+    result = apply_rule(WORD_INITIAL_TRIGGER, WORD_INITIAL_TRIGGER_AST, [C, D], ALPHABET)
+    assert result == [{"F": "+", "G": "+"}, {"F": "+", "G": "-"}]
+
+
+def test_apply_rule_eos_in_inr_deletion():
+    # [C, D]: D is -F immediately before EOS → D is deleted
+    result = apply_rule(WORD_FINAL_DELETION, WORD_FINAL_DELETION_AST, [C, D], ALPHABET)
+    assert result == [C]
+
+
+def test_apply_rule_eos_in_inr_deletion_only_final():
+    # [D, A]: A is +F so not a target; D is not word-final → nothing deleted
+    result = apply_rule(WORD_FINAL_DELETION, WORD_FINAL_DELETION_AST, [D, A], ALPHABET)
+    assert result == [D, A]
+
+
+def test_apply_rule_epenthesis_before_eos():
+    # [B]: insert A before EOS → [B, A]
+    result = apply_rule(EPENTHESIS_WORD_FINAL, EPENTHESIS_WORD_FINAL_AST, [B], ALPHABET)
+    assert result == [B, A]
+
+
+def test_apply_rule_boundaries_stripped_from_output():
+    # BOS/EOS should never appear in the returned word
+    result = apply_rule(ASSIMILATION_R, ASSIMILATION_R_AST, [C, A], ALPHABET)
+    assert BOS_SEGMENT not in result
+    assert EOS_SEGMENT not in result
+
+
+def test_apply_rule_boundary_position_error():
+    # A rule that swaps BOS and the following segment puts BOS at position 1 — illegal.
+    # INR = [[+BOS], []], Trm = [], Out = (concat (nth 2 INR) (nth 1 INR))
+    # Bracketed [BOS, A, EOS]: window at 0 is [BOS, A] → output [A, BOS] → BOS not at 0.
+    bad_rule = Rule(
+        Id="bad",
+        Inr=[["+BOS"], []],
+        Trm=[],
+        Dir="L",
+        Out="(concat (nth 2 INR) (nth 1 INR))",
+    )
+    bad_ast = parse(bad_rule.Out)
+    with pytest.raises(EvalError, match="BOS boundary ended up at position"):
+        apply_rule(bad_rule, bad_ast, [A], ALPHABET)
