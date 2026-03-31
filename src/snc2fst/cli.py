@@ -710,7 +710,6 @@ def compile_cmd(config_file, out_dir, fmt, max_arcs, no_optimize, verbose):
                 f"Rule '{rule.Id}' would produce {arc_count:,} arcs "
                 f"(limit {max_arcs:,}). Use --max-arcs to raise the limit."
             )
-        click.echo(f"  {rule.Id}: {arc_count:,} arcs")
 
     # Compile each rule with its effective input alphabet
     fsts: list[pynini.Fst] = []
