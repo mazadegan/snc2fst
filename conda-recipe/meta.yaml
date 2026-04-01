@@ -1,0 +1,42 @@
+{% set name = "snc2fst" %}
+{% set version = "1.0.0" %}
+
+package:
+  name: {{ name }}
+  version: {{ version }}
+
+source:
+  path: ..
+
+build:
+  noarch: python
+  script: {{ PYTHON }} -m pip install . -vv
+  entry_points:
+    - snc2fst = snc2fst.cli:main
+    - snc = snc2fst.cli:main
+
+requirements:
+  host:
+    - python >=3.12
+    - pip
+    - setuptools >=61.0
+  run:
+    - python >=3.12
+    - click >=8.0.0
+    - prettytable >=3.0.0
+    - pydantic >=2.0.0
+    - questionary >=2.0.0
+    - langcodes >=3.3.0
+    - pynini
+
+test:
+  imports:
+    - snc2fst
+  commands:
+    - snc --help
+
+about:
+  home: https://github.com/mazadegan/snc2fst
+  license: Apache-2.0
+  license_file: LICENSE
+  summary: Compiles Search-and-Change grammars to OpenFST transducers.
