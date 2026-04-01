@@ -271,6 +271,8 @@ Out = "(unify INR[1] {-Back})"
 
 Because rules apply in order, R3 only fires when neither R1 nor R2 found a trigger.
 
+> **Note:** The starter projects are examples intended to demonstrate how the software works. They are not meant to be complete analyses of the phonological patterns they are based on.
+
 ## Developer Notes
 
 ### Releasing a new version
