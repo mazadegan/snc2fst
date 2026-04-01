@@ -10,13 +10,13 @@ import re
 from snc2fst import ast
 
 _OPERATORS = frozenset({
-    "in?", "models?", "if",
+    "in?", "if",
     "unify", "subtract", "proj",
 })
 
 _TOKEN_RE = re.compile(r"""
     (?:\s+|;[^\n]*)       # whitespace and line comments — skip
-    |([()[\]{}&,])        # punctuation
+    |([()[\]{}&,:])       # punctuation
     |([+\-])              # sign
     |([0-9]+)             # integer
     |([^\W\d_][^\W_]*\??) # name, keyword, or operator (Unicode letters + optional ?)
@@ -91,17 +91,24 @@ class _Parser:
         raise ParseError(f"Unexpected token: {tok!r}")
 
     def _maybe_index(self, seq: ast.Expr) -> ast.Expr:
-        """If the next token is '[' followed by an integer, parse as INR[N]/TRM[N]."""
+        """Parse INR[N], INR[N:M], or bare INR."""
         if self.peek() != "[":
             return seq
-        # Peek two tokens ahead to distinguish INR[1] from INR used before a bracket expr
         saved = self.pos
         self.consume()  # consume '['
         tok = self.peek()
         if tok is not None and re.fullmatch(r"[0-9]+", tok):
-            n = int(self.consume())
+            start = int(self.consume())
+            if self.peek() == ":":
+                self.consume()  # consume ':'
+                tok2 = self.peek()
+                if tok2 is None or not re.fullmatch(r"[0-9]+", tok2):
+                    raise ParseError(f"Expected integer after ':', got {tok2!r}")
+                end = int(self.consume())
+            else:
+                end = start  # INR[N] is sugar for INR[N:N]
             self.expect("]")
-            return ast.Nth(ast.Integer(n), seq)
+            return ast.Slice(start, end, seq)
         # Not an index — restore position and return bare seq
         self.pos = saved
         return seq
@@ -154,12 +161,8 @@ class _Parser:
         match op:
             case "in?":
                 check_argc(2)
-                check_type(1, ast.NcSequence, "a natural class e.g. [{+F -G}]")
-                return ast.InClass(segment=args[0], spec=args[1].specs[0])
-            case "models?":
-                check_argc(2)
-                check_type(1, ast.NcSequence, "a NC sequence e.g. [{+F} {-G}]")
-                return ast.Models(sequence=args[0], nc_seq=args[1])
+                check_type(1, ast.NcSequence, "a natural class sequence e.g. [{+F -G}]")
+                return ast.InClass(sequence=args[0], nc_seq=args[1])
             case "if":
                 check_argc(3)
                 return ast.If(cond=args[0], then=args[1], else_=args[2])
@@ -273,19 +276,23 @@ def collect_errors(
 
     def walk(n: ast.Expr):
         match n:
-            case ast.Nth(index=ast.Integer(value=i), sequence=seq):
-                if i < 1:
+            case ast.Slice(start=s, end=e, sequence=seq):
+                if s < 1 or e < 1:
                     errors.append(
-                        f"Rule '{rule_id}': INR[{i}]/TRM[{i}] — index must be >= 1."
+                        f"Rule '{rule_id}': INR/TRM[{s}:{e}] — indices must be >= 1."
                     )
-                elif isinstance(seq, ast.Inr) and i > inr_len:
+                elif s > e:
                     errors.append(
-                        f"Rule '{rule_id}': INR[{i}] out of bounds"
+                        f"Rule '{rule_id}': INR/TRM[{s}:{e}] — start must be <= end."
+                    )
+                elif isinstance(seq, ast.Inr) and e > inr_len:
+                    errors.append(
+                        f"Rule '{rule_id}': INR[{s}:{e}] out of bounds"
                         f" — INR has length {inr_len}."
                     )
-                elif isinstance(seq, ast.Trm) and i > trm_len:
+                elif isinstance(seq, ast.Trm) and e > trm_len:
                     errors.append(
-                        f"Rule '{rule_id}': TRM[{i}] out of bounds"
+                        f"Rule '{rule_id}': TRM[{s}:{e}] out of bounds"
                         f" — TRM has length {trm_len}."
                     )
                 walk(seq)
@@ -310,10 +317,7 @@ def collect_errors(
                             f"Rule '{rule_id}': undefined feature '{name}' in Out expression."
                         )
                 walk(seg)
-            case ast.InClass(segment=seg, spec=fs):
-                check_features(fs.features)
-                walk(seg)
-            case ast.Models(sequence=seq, nc_seq=nc):
+            case ast.InClass(sequence=seq, nc_seq=nc):
                 for spec in nc.specs:
                     check_features(spec.features)
                 walk(seq)

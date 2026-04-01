@@ -30,10 +30,16 @@ def test_symbol_ipa():
 # ---------------------------------------------------------------------------
 
 def test_inr_index():
-    assert parse("INR[1]") == ast.Nth(ast.Integer(1), ast.Inr())
+    assert parse("INR[1]") == ast.Slice(1, 1, ast.Inr())
 
 def test_trm_index():
-    assert parse("TRM[2]") == ast.Nth(ast.Integer(2), ast.Trm())
+    assert parse("TRM[2]") == ast.Slice(2, 2, ast.Trm())
+
+def test_inr_slice():
+    assert parse("INR[1:3]") == ast.Slice(1, 3, ast.Inr())
+
+def test_trm_slice():
+    assert parse("TRM[2:4]") == ast.Slice(2, 4, ast.Trm())
 
 def test_inr_bare_not_indexed():
     assert parse("INR") == ast.Inr()
@@ -96,43 +102,52 @@ def test_nc_sequence_empty_bundle():
 
 def test_unify_with_bundle():
     assert parse("(unify INR[1] {+F})") == ast.Unify(
-        ast.Nth(ast.Integer(1), ast.Inr()),
+        ast.Slice(1, 1, ast.Inr()),
         ast.FeatureSpec([ast.ValuedFeature("+", "F")]),
     )
 
 def test_subtract():
     assert parse("(subtract INR[1] {-G})") == ast.Subtract(
-        ast.Nth(ast.Integer(1), ast.Inr()),
+        ast.Slice(1, 1, ast.Inr()),
         ast.FeatureSpec([ast.ValuedFeature("-", "G")]),
     )
 
 def test_proj_single():
     assert parse("(proj INR[1] (F))") == ast.Project(
-        ast.Nth(ast.Integer(1), ast.Inr()),
+        ast.Slice(1, 1, ast.Inr()),
         ast.FeatureNames(["F"]),
     )
 
 def test_proj_multiple():
     assert parse("(proj TRM[1] (F G))") == ast.Project(
-        ast.Nth(ast.Integer(1), ast.Trm()),
+        ast.Slice(1, 1, ast.Trm()),
         ast.FeatureNames(["F", "G"]),
     )
 
 def test_in_class():
     assert parse("(in? TRM[1] [{+F}])") == ast.InClass(
-        ast.Nth(ast.Integer(1), ast.Trm()),
-        ast.FeatureSpec([ast.ValuedFeature("+", "F")]),
+        ast.Slice(1, 1, ast.Trm()),
+        ast.NcSequence([ast.FeatureSpec([ast.ValuedFeature("+", "F")])]),
     )
 
-def test_models():
-    assert parse("(models? TRM [{+F}])") == ast.Models(
+def test_in_class_sequence():
+    assert parse("(in? TRM [{+F}])") == ast.InClass(
         ast.Trm(),
         ast.NcSequence([ast.FeatureSpec([ast.ValuedFeature("+", "F")])]),
     )
 
+def test_in_class_multi_position():
+    assert parse("(in? TRM [{+F} {-G}])") == ast.InClass(
+        ast.Trm(),
+        ast.NcSequence([
+            ast.FeatureSpec([ast.ValuedFeature("+", "F")]),
+            ast.FeatureSpec([ast.ValuedFeature("-", "G")]),
+        ]),
+    )
+
 def test_if():
-    assert parse("(if (models? TRM [{+F}]) INR INR)") == ast.If(
-        cond=ast.Models(
+    assert parse("(if (in? TRM [{+F}]) INR INR)") == ast.If(
+        cond=ast.InClass(
             ast.Trm(),
             ast.NcSequence([ast.FeatureSpec([ast.ValuedFeature("+", "F")])]),
         ),
@@ -147,35 +162,35 @@ def test_if():
 
 def test_implicit_concat_single():
     assert parse("(INR[1])") == ast.Concat([
-        ast.Nth(ast.Integer(1), ast.Inr()),
+        ast.Slice(1, 1, ast.Inr()),
     ])
 
 def test_implicit_concat_metathesis():
     assert parse("(INR[2] INR[1])") == ast.Concat([
-        ast.Nth(ast.Integer(2), ast.Inr()),
-        ast.Nth(ast.Integer(1), ast.Inr()),
+        ast.Slice(2, 2, ast.Inr()),
+        ast.Slice(1, 1, ast.Inr()),
     ])
 
 def test_implicit_concat_epenthesis():
     assert parse("(INR[1] &ə INR[2])") == ast.Concat([
-        ast.Nth(ast.Integer(1), ast.Inr()),
+        ast.Slice(1, 1, ast.Inr()),
         ast.Symbol("ə"),
-        ast.Nth(ast.Integer(2), ast.Inr()),
+        ast.Slice(2, 2, ast.Inr()),
     ])
 
 def test_implicit_concat_with_bundle():
     assert parse("(INR[1] {+F -G} INR[2])") == ast.Concat([
-        ast.Nth(ast.Integer(1), ast.Inr()),
+        ast.Slice(1, 1, ast.Inr()),
         ast.FeatureSpec([ast.ValuedFeature("+", "F"), ast.ValuedFeature("-", "G")]),
-        ast.Nth(ast.Integer(2), ast.Inr()),
+        ast.Slice(2, 2, ast.Inr()),
     ])
 
 def test_conditional_assimilation():
     result = parse(
-        "(if (models? TRM [{+F}]) (unify INR[1] {+F}) INR)"
+        "(if (in? TRM [{+F}]) (unify INR[1] {+F}) INR)"
     )
     assert isinstance(result, ast.If)
-    assert isinstance(result.cond, ast.Models)
+    assert isinstance(result.cond, ast.InClass)
     assert isinstance(result.then, ast.Unify)
     assert isinstance(result.else_, ast.Inr)
 
@@ -189,7 +204,7 @@ def test_leading_trailing_whitespace():
 
 def test_internal_whitespace():
     assert parse("( unify  INR[1]  {+F} )") == ast.Unify(
-        ast.Nth(ast.Integer(1), ast.Inr()),
+        ast.Slice(1, 1, ast.Inr()),
         ast.FeatureSpec([ast.ValuedFeature("+", "F")]),
     )
 
@@ -197,9 +212,7 @@ def test_line_comment_ignored():
     assert parse("; this is a comment\nINR") == ast.Inr()
 
 def test_inline_comment_ignored():
-    assert parse("INR[1] ; extract first segment") == ast.Nth(
-        ast.Integer(1), ast.Inr()
-    )
+    assert parse("INR[1] ; extract first segment") == ast.Slice(1, 1, ast.Inr())
 
 
 # ---------------------------------------------------------------------------
@@ -222,9 +235,9 @@ def test_error_unify_wrong_type():
     with pytest.raises(ParseError, match="feature bundle"):
         parse("(unify INR[1] [{+F}])")  # NcSequence instead of FeatureSpec
 
-def test_error_models_wrong_type():
-    with pytest.raises(ParseError, match="NC sequence"):
-        parse("(models? TRM {+F})")  # FeatureSpec instead of NcSequence
+def test_error_in_class_sequence_wrong_type():
+    with pytest.raises(ParseError, match="natural class sequence"):
+        parse("(in? TRM {+F})")  # FeatureSpec instead of NcSequence
 
 def test_error_proj_wrong_type():
     with pytest.raises(ParseError, match="feature name list"):

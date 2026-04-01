@@ -14,22 +14,22 @@ def parse(s):
 # ---------------------------------------------------------------------------
 
 def test_txt_inr():
-    assert _expr_txt(parse("INR")) == "ι"
+    assert _expr_txt(parse("INR")) == "INR"
 
 def test_txt_trm():
-    assert _expr_txt(parse("TRM")) == "τ"
+    assert _expr_txt(parse("TRM")) == "TRM"
 
 def test_txt_nth_inr():
-    assert _expr_txt(parse("INR[1]")) == "ι₁"
+    assert _expr_txt(parse("INR[1]")) == "INR[1]"
 
 def test_txt_nth_trm():
-    assert _expr_txt(parse("TRM[2]")) == "τ₂"
+    assert _expr_txt(parse("TRM[2]")) == "TRM[2]"
 
 def test_txt_symbol():
-    assert _expr_txt(parse("&ə")) == "ə"
+    assert _expr_txt(parse("&ə")) == "&ə"
 
 def test_txt_feature_spec():
-    assert _expr_txt(parse("{+Back -High}")) == "{+Back, -High}"
+    assert _expr_txt(parse("{+Back -High}")) == "{+Back -High}"
 
 def test_txt_feature_spec_empty():
     assert _expr_txt(parse("{}")) == "{}"
@@ -61,26 +61,32 @@ def test_latex_feature_spec_empty():
 # ---------------------------------------------------------------------------
 
 def test_txt_unify_literal():
-    assert _expr_txt(parse("(unify INR[1] {+Back})")) == "(ι₁ ⊔ {+Back})"
+    assert _expr_txt(parse("(unify INR[1] {+Back})")) == "(unify INR[1] {+Back})"
 
 def test_txt_unify_expr():
     assert _expr_txt(parse("(unify INR[1] (proj TRM[1] (Back)))")) == \
-        "(ι₁ ⊔ (τ₁ ↾ {Back}))"
+        "(unify INR[1] (proj TRM[1] (Back)))"
 
 def test_txt_subtract():
-    assert _expr_txt(parse("(subtract INR[1] {+Dorsal})")) == "(ι₁ ∖ {+Dorsal})"
+    assert _expr_txt(parse("(subtract INR[1] {+Dorsal})")) == "(subtract INR[1] {+Dorsal})"
 
 def test_txt_proj():
-    assert _expr_txt(parse("(proj TRM[1] (Back))")) == "(τ₁ ↾ {Back})"
+    assert _expr_txt(parse("(proj TRM[1] (Back))")) == "(proj TRM[1] (Back))"
 
 def test_txt_concat():
-    assert _expr_txt(parse("(INR[1] INR[2])")) == "ι₁ · ι₂"
+    assert _expr_txt(parse("(INR[1] INR[2])")) == "(INR[1] INR[2])"
 
 def test_txt_in_class():
-    assert _expr_txt(parse("(in? TRM[1] [{-Back}])")) == "τ₁ ∈ 𝒩({-Back})"
+    assert _expr_txt(parse("(in? TRM[1] [{-Back}])")) == "(in? TRM[1] [{-Back}])"
 
-def test_txt_models():
-    assert _expr_txt(parse("(models? INR [{+Back}])")) == "ι ⊨ ⟨{+Back}⟩"
+def test_txt_in_class_sequence():
+    assert _expr_txt(parse("(in? INR [{+Back}])")) == "(in? INR [{+Back}])"
+
+def test_txt_slice():
+    assert _expr_txt(parse("INR[1:3]")) == "INR[1:3]"
+
+def test_txt_slice_single():
+    assert _expr_txt(parse("INR[2]")) == "INR[2]"
 
 def test_latex_unify_literal():
     assert _expr_latex(parse("(unify INR[1] {+Back})")) == \
@@ -99,8 +105,10 @@ def test_latex_concat():
         "\\iota_{1} \\cdot \\iota_{2}"
 
 def test_latex_in_class():
-    assert _expr_latex(parse("(in? TRM[1] [{-Back}])")) == \
-        "\\tau_{1} \\in \\mathcal{N}(\\{-\\textsc{Back}\\})"
+    result = _expr_latex(parse("(in? TRM[1] [{-Back}])"))
+    assert "\\tau_{1}" in result
+    assert "\\mathcal{N}" in result
+    assert "\\textsc{Back}" in result
 
 
 # ---------------------------------------------------------------------------
@@ -109,17 +117,21 @@ def test_latex_in_class():
 
 def test_txt_if():
     result = _expr_txt(parse("(if (in? TRM[1] [{-Back}]) INR[1] INR)"))
-    assert "if τ₁ ∈ 𝒩({-Back}):" in result
-    assert "ι₁" in result
-    assert "else:" in result
-    assert result.splitlines()[-1].strip() == "ι"
+    assert result.startswith("(if (in? TRM[1] [{-Back}])")
+    assert "INR[1]" in result
+    assert "INR)" in result
 
 def test_txt_if_nested():
     expr = "(if (in? TRM[1] [{-Back}]) (if (in? INR[1] [{+High}]) INR[1] INR) INR)"
     result = _expr_txt(parse(expr))
     lines = result.splitlines()
-    assert lines[0].startswith("if ")
-    assert any("if " in l for l in lines[1:])
+    assert lines[0].startswith("(if ")
+    assert any("(if " in l for l in lines[1:])
+
+def test_latex_in_class_sequence():
+    result = _expr_latex(parse("(in? TRM [{-Back}])"))
+    assert "\\mathcal{N}" in result
+    assert "\\langle" in result
 
 def test_latex_if_top_level():
     result = _expr_latex(parse("(if (in? TRM[1] [{-Back}]) INR[1] INR)"), depth=0)

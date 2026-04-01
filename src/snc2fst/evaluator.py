@@ -16,6 +16,19 @@ def _to_spec_seq(nc_seq: ast.NcSequence) -> FeatureSpecSequence:
     return [_to_spec(spec) for spec in nc_seq.specs]
 
 
+def _as_segment(val, op_name: str) -> Segment:
+    """Extract a single segment from a segment or length-1 sequence."""
+    if isinstance(val, dict):
+        return val
+    if isinstance(val, list):
+        if len(val) == 1:
+            return val[0]
+        raise EvalError(
+            f"'{op_name}' expected a single segment, got a sequence of length {len(val)}"
+        )
+    raise EvalError(f"'{op_name}' expected a segment, got {type(val).__name__}")
+
+
 def evaluate(
     node: ast.Expr,
     inr: Word,
@@ -28,9 +41,9 @@ def evaluate(
             return list(inr)
         case ast.Trm():
             return list(trm)
-        case ast.Nth(index=ast.Integer(value=i), sequence=seq):
+        case ast.Slice(start=s, end=e, sequence=seq):
             word = evaluate(seq, inr, trm, alphabet)
-            return word[i - 1]  # 1-based indexing
+            return list(word)[s - 1:e]  # 1-based, inclusive; always a list
         case ast.Symbol(name=name):
             if name not in alphabet:
                 raise EvalError(f"Unknown segment symbol: '{name}'")
@@ -39,18 +52,18 @@ def evaluate(
             # Bare feature spec in Concat = epenthetic underspecified segment
             return {name: sign for sign, name in _to_spec(fs)}
         case ast.Unify(segment=seg_node, features=fs):
-            seg = evaluate(seg_node, inr, trm, alphabet)
+            seg = _as_segment(evaluate(seg_node, inr, trm, alphabet), "unify")
             if isinstance(fs, ast.FeatureSpec):
                 spec = _to_spec(fs)
             else:
-                other = evaluate(fs, inr, trm, alphabet)
+                other = _as_segment(evaluate(fs, inr, trm, alphabet), "unify")
                 spec = [(v, f) for f, v in other.items()]
             return operations.unify(seg, spec)
         case ast.Subtract(segment=seg_node, features=fs):
-            seg = evaluate(seg_node, inr, trm, alphabet)
+            seg = _as_segment(evaluate(seg_node, inr, trm, alphabet), "subtract")
             return operations.subtract(seg, _to_spec(fs))
         case ast.Project(segment=seg_node, names=fn):
-            seg = evaluate(seg_node, inr, trm, alphabet)
+            seg = _as_segment(evaluate(seg_node, inr, trm, alphabet), "proj")
             return operations.project(seg, fn.names)
         case ast.Concat(args=args):
             result: Word = []
@@ -61,11 +74,9 @@ def evaluate(
                 else:
                     result.append(val)
             return result
-        case ast.InClass(segment=seg_node, spec=spec):
-            seg = evaluate(seg_node, inr, trm, alphabet)
-            return operations.in_class(seg, _to_spec(spec))
-        case ast.Models(sequence=seq_node, nc_seq=nc_seq):
-            word = evaluate(seq_node, inr, trm, alphabet)
+        case ast.InClass(sequence=seq_node, nc_seq=nc_seq):
+            val = evaluate(seq_node, inr, trm, alphabet)
+            word = [val] if isinstance(val, dict) else list(val)
             return operations.models(word, _to_spec_seq(nc_seq))
         case ast.If(cond=cond_node, then=then_node, else_=else_node):
             if evaluate(cond_node, inr, trm, alphabet):

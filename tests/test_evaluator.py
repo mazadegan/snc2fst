@@ -39,15 +39,19 @@ def test_eval_trm():
 
 
 def test_eval_nth_inr():
-    assert evaluate(parse("INR[1]"), [A, B], [], ALPHABET) == A
+    assert evaluate(parse("INR[1]"), [A, B], [], ALPHABET) == [A]
 
 
 def test_eval_nth_trm():
-    assert evaluate(parse("TRM[1]"), [], [C], ALPHABET) == C
+    assert evaluate(parse("TRM[1]"), [], [C], ALPHABET) == [C]
 
 
 def test_eval_nth_second():
-    assert evaluate(parse("INR[2]"), [A, B], [], ALPHABET) == B
+    assert evaluate(parse("INR[2]"), [A, B], [], ALPHABET) == [B]
+
+
+def test_eval_slice():
+    assert evaluate(parse("INR[1:2]"), [A, B, C], [], ALPHABET) == [A, B]
 
 
 def test_eval_symbol():
@@ -101,13 +105,19 @@ def test_eval_in_class_false():
     assert evaluate(parse("(in? INR[1] [{-F}])"), [A], [], ALPHABET) is False
 
 
-def test_eval_models_true():
-    result = evaluate(parse("(models? TRM [{+F}])"), [], [A], ALPHABET)
+def test_eval_in_class_sequence_true():
+    result = evaluate(parse("(in? TRM [{+F}])"), [], [A], ALPHABET)
     assert result is True
 
 
-def test_eval_models_false():
-    result = evaluate(parse("(models? TRM [{-F}])"), [], [A], ALPHABET)
+def test_eval_in_class_sequence_false():
+    result = evaluate(parse("(in? TRM [{-F}])"), [], [A], ALPHABET)
+    assert result is False
+
+
+def test_eval_in_class_length_mismatch():
+    # Single segment tested against 2-position NC seq → False (not an error)
+    result = evaluate(parse("(in? TRM [{+F} {-G}])"), [], [A], ALPHABET)
     assert result is False
 
 
@@ -157,7 +167,7 @@ def test_eval_if_then_branch():
     # TRM = [A] has +F → then branch: unify INR[1] (which is {F:"-"}) with {+G}
     # {F:"-"} has no -G, so +G can be added → {F:"-", G:"+"}
     result = evaluate(
-        parse("(if (models? TRM [{+F}]) (unify INR[1] {+G}) INR)"),
+        parse("(if (in? TRM [{+F}]) (unify INR[1] {+G}) INR)"),
         [{"F": "-"}],
         [A],
         ALPHABET,
@@ -168,7 +178,7 @@ def test_eval_if_then_branch():
 def test_eval_if_else_branch():
     # TRM = [D] which has -F, so else branch taken: return INR unchanged
     result = evaluate(
-        parse("(if (models? TRM [{+F}]) (unify INR[1] {+G}) INR)"),
+        parse("(if (in? TRM [{+F}]) (unify INR[1] {+G}) INR)"),
         [D],
         [D],
         ALPHABET,
@@ -282,7 +292,7 @@ CONDITIONAL = Rule(
     Inr=[["-F"]],
     Trm=[["+F"]],
     Dir="R",
-    Out="(if (in? TRM[1] [{+G}]) (unify (subtract INR[1] {-G}) {+G}) INR)",
+    Out="(if (in? TRM[1] [{+G}]) (unify (subtract INR[1] {-G}) {+G}) INR)",  # TRM[1] is a length-1 seq
 )
 CONDITIONAL_AST = parse(CONDITIONAL.Out)
 

@@ -38,9 +38,9 @@ def test_proj():
 def test_epenthesis():
     assert errors("(INR[1] {+F -G} INR[2])") == []
 
-def test_conditional_via_models():
+def test_conditional_via_in_class_sequence():
     assert errors(
-        "(if (models? TRM [{+F}]) (unify INR[1] {+F}) INR)"
+        "(if (in? TRM [{+F}]) (unify INR[1] {+F}) INR)"
     ) == []
 
 def test_conditional_via_in_class():
@@ -65,13 +65,13 @@ def test_trm_index_at_boundary():
 def test_inr_index_out_of_bounds():
     errs = errors("(INR[3])", inr_len=2)
     assert len(errs) == 1
-    assert "INR[3]" in errs[0]
+    assert "INR[3" in errs[0]
     assert "length 2" in errs[0]
 
 def test_trm_index_out_of_bounds():
     errs = errors("(proj TRM[2] (F))", trm_len=1)
     assert len(errs) == 1
-    assert "TRM[2]" in errs[0]
+    assert "TRM[2" in errs[0]
     assert "length 1" in errs[0]
 
 def test_index_zero():
@@ -118,7 +118,7 @@ def test_in_class_undefined_feature():
     assert "H" in errs[0]
 
 def test_models_undefined_feature():
-    errs = errors("(if (models? TRM [{+H}]) INR INR)")
+    errs = errors("(if (in? TRM [{+H}]) INR INR)")
     assert len(errs) == 1
     assert "H" in errs[0]
 

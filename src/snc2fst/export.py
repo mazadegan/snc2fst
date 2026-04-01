@@ -23,39 +23,36 @@ def _expr_txt(node: ast.Expr, depth: int = 0) -> str:
     indent = "  " * depth
     match node:
         case ast.Inr():
-            return "ι"
+            return "INR"
         case ast.Trm():
-            return "τ"
-        case ast.Nth(index=ast.Integer(value=i), sequence=ast.Inr()):
-            return f"ι{_subscript(i)}"
-        case ast.Nth(index=ast.Integer(value=i), sequence=ast.Trm()):
-            return f"τ{_subscript(i)}"
+            return "TRM"
+        case ast.Slice(start=s, end=e, sequence=ast.Inr()):
+            return f"INR[{s}]" if s == e else f"INR[{s}:{e}]"
+        case ast.Slice(start=s, end=e, sequence=ast.Trm()):
+            return f"TRM[{s}]" if s == e else f"TRM[{s}:{e}]"
         case ast.Symbol(name=name):
-            return name
+            return f"&{name}"
         case ast.FeatureSpec(features=features):
             parts = [f"{f.sign}{f.name}" for f in features]
-            return "{" + ", ".join(parts) + "}"
+            return "{" + " ".join(parts) + "}"
         case ast.FeatureNames(names=names):
-            return "{" + ", ".join(names) + "}"
+            return "(" + " ".join(names) + ")"
         case ast.Unify(segment=seg, features=fs):
-            return f"({_expr_txt(seg)} ⊔ {_expr_txt(fs)})"
+            return f"(unify {_expr_txt(seg)} {_expr_txt(fs)})"
         case ast.Subtract(segment=seg, features=fs):
-            return f"({_expr_txt(seg)} ∖ {_expr_txt(fs)})"
+            return f"(subtract {_expr_txt(seg)} {_expr_txt(fs)})"
         case ast.Project(segment=seg, names=fn):
-            return f"({_expr_txt(seg)} ↾ {_expr_txt(fn)})"
+            return f"(proj {_expr_txt(seg)} {_expr_txt(fn)})"
         case ast.Concat(args=args):
-            return " · ".join(_expr_txt(a) for a in args)
-        case ast.InClass(segment=seg, spec=fs):
-            return f"{_expr_txt(seg)} ∈ 𝒩({_expr_txt(fs)})"
-        case ast.Models(sequence=seq, nc_seq=ast.NcSequence(specs=specs)):
-            nc_parts = ", ".join(_expr_txt(s) for s in specs)
-            return f"{_expr_txt(seq)} ⊨ ⟨{nc_parts}⟩"
+            return "(" + " ".join(_expr_txt(a) for a in args) + ")"
+        case ast.InClass(sequence=seq, nc_seq=ast.NcSequence(specs=specs)):
+            nc_parts = " ".join(_expr_txt(s) for s in specs)
+            return f"(in? {_expr_txt(seq)} [{nc_parts}])"
         case ast.If(cond=cond, then=then, else_=else_):
             lines = [
-                f"{indent}if {_expr_txt(cond)}:",
-                f"{indent}  {_expr_txt(then, depth + 1)}",
-                f"{indent}else:",
-                f"{indent}  {_expr_txt(else_, depth + 1)}",
+                f"{indent}(if {_expr_txt(cond)}",
+                f"{indent}    {_expr_txt(then, depth + 1)}",
+                f"{indent}    {_expr_txt(else_, depth + 1)})",
             ]
             return "\n".join(lines)
         case _:
@@ -77,10 +74,10 @@ def _expr_latex(node: ast.Expr, depth: int = 0) -> str:
             return "\\iota"
         case ast.Trm():
             return "\\tau"
-        case ast.Nth(index=ast.Integer(value=i), sequence=ast.Inr()):
-            return f"\\iota_{{{i}}}"
-        case ast.Nth(index=ast.Integer(value=i), sequence=ast.Trm()):
-            return f"\\tau_{{{i}}}"
+        case ast.Slice(start=s, end=e, sequence=ast.Inr()):
+            return f"\\iota_{{{s}}}" if s == e else f"\\iota_{{[{s}:{e}]}}"
+        case ast.Slice(start=s, end=e, sequence=ast.Trm()):
+            return f"\\tau_{{{s}}}" if s == e else f"\\tau_{{[{s}:{e}]}}"
         case ast.Symbol(name=name):
             return f"\\text{{{name}}}"
         case ast.FeatureSpec(features=features):
@@ -97,11 +94,9 @@ def _expr_latex(node: ast.Expr, depth: int = 0) -> str:
             return f"({_expr_latex(seg)} \\upharpoonright {_expr_latex(fn)})"
         case ast.Concat(args=args):
             return " \\cdot ".join(_expr_latex(a) for a in args)
-        case ast.InClass(segment=seg, spec=fs):
-            return f"{_expr_latex(seg)} \\in \\mathcal{{N}}({_expr_latex(fs)})"
-        case ast.Models(sequence=seq, nc_seq=ast.NcSequence(specs=specs)):
+        case ast.InClass(sequence=seq, nc_seq=ast.NcSequence(specs=specs)):
             nc_parts = ", ".join(_expr_latex(s) for s in specs)
-            return f"{_expr_latex(seq)} \\models \\langle {nc_parts} \\rangle"
+            return f"{_expr_latex(seq)} \\in \\mathcal{{N}}(\\langle {nc_parts} \\rangle)"
         case ast.If(cond=cond, then=then, else_=else_):
             if depth == 0:
                 lines = [
@@ -129,11 +124,11 @@ def _nc_seq_txt(nc_seq: list[list[tuple[str, str]]]) -> str:
     parts = []
     for spec in nc_seq:
         if not spec:
-            parts.append("[]")
+            parts.append("[∅]")
         else:
-            inner = ", ".join(f"{sign}{name}" for sign, name in spec)
-            parts.append("{" + inner + "}")
-    return "⟨" + ", ".join(parts) + "⟩"
+            inner = " ".join(f"{sign}{name}" for sign, name in spec)
+            parts.append("[{" + inner + "}]")
+    return "⟨" + " ".join(parts) + "⟩"
 
 
 def _nc_seq_latex(nc_seq: list[list[tuple[str, str]]]) -> str:
@@ -153,9 +148,11 @@ def _rule_txt(rule: Rule, out_ast: ast.Expr) -> str:
     lines.append(f"  Inr: {_nc_seq_txt(rule.Inr)}")
     lines.append(f"  Trm: {_nc_seq_txt(rule.Trm)}")
     out_rendered = _expr_txt(out_ast)
-    # indent each line of Out
-    out_indented = "\n".join("    " + l for l in out_rendered.splitlines())
-    lines.append(f"  Out:\n{out_indented}")
+    if "\n" in out_rendered:
+        out_indented = "\n".join("    " + l for l in out_rendered.splitlines())
+        lines.append(f"  Out:\n{out_indented}")
+    else:
+        lines.append(f"  Out: {out_rendered}")
     return "\n".join(lines)
 
 

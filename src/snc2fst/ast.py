@@ -59,51 +59,46 @@ class Symbol:
 
 
 @dataclass
-class Nth:
-    index: Integer
-    sequence: Expr
+class Slice:
+    start: int
+    end: int
+    sequence: "Expr"
 
 
 @dataclass
 class InClass:
-    segment: Expr
-    spec: FeatureSpec
-
-
-@dataclass
-class Models:
-    sequence: Expr
+    sequence: "Expr"
     nc_seq: NcSequence
 
 
 @dataclass
 class If:
-    cond: Expr
-    then: Expr
-    else_: Expr
+    cond: "Expr"
+    then: "Expr"
+    else_: "Expr"
 
 
 @dataclass
 class Unify:
-    segment: Expr
+    segment: "Expr"
     features: "Expr"  # FeatureSpec literal or any segment-returning expression
 
 
 @dataclass
 class Subtract:
-    segment: Expr
+    segment: "Expr"
     features: FeatureSpec
 
 
 @dataclass
 class Project:
-    segment: Expr
+    segment: "Expr"
     names: FeatureNames
 
 
 @dataclass
 class Concat:
-    args: list[Expr]
+    args: list["Expr"]
 
 
 # ---------------------------------------------------------------------------
@@ -115,9 +110,8 @@ Expr: TypeAlias = Union[
     Trm,
     Integer,
     Symbol,
-    Nth,
+    Slice,
     InClass,
-    Models,
     If,
     Unify,
     Subtract,
