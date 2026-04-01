@@ -122,16 +122,27 @@ def test_starter_fst_agrees(name):
     with importlib.resources.as_file(d.joinpath(config.tests_path)) as path:
         tests = load_tests(path)
 
+    def _uses_boundary(rule) -> bool:
+        return any(
+            any(feat in ("BOS", "EOS") for _, feat in bundle)
+            for bundle in rule.Inr
+        )
+
     failures = []
     for inp_str, expected_str in tests:
         seg_names = tokenize(inp_str, alphabet)
 
         for rule in config.rules:
             fst = compile_rule(rule, alphabet)
+            bounded = _uses_boundary(rule)
+            if bounded:
+                seg_names = ["⋊"] + list(seg_names) + ["⋉"]
             if rule.Dir == "R":
                 seg_names = list(reversed(_transduce(fst, list(reversed(seg_names)), pynini)))
             else:
                 seg_names = _transduce(fst, seg_names, pynini)
+            if bounded:
+                seg_names = [s for s in seg_names if s not in ("⋊", "⋉")]
 
         result_str = "".join(seg_names)
         if result_str != expected_str:

@@ -5,7 +5,7 @@ tests_path = "tests.csv"
 title = "English past tense allomorphy"
 language = "eng"
 description = "Schwa epenthesis between identical coronal stops, followed by voicing harmony of the past tense suffix /D/."
-sources = []
+sources = ["Hayes, B. (2009). Introductory Phonology. Wiley-Blackwell. Section 6.3."]
 compilable = true
 
 # R1: Schwa epenthesis between coronal stops (d, t)

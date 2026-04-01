@@ -1,0 +1,16 @@
+alphabet_path = "alphabet.csv"
+tests_path = "tests.tsv"
+
+[meta]
+title = "Iloko Plural"
+language = "ilo"
+description = "Plural noun formation via reduplication of the first consonant + vowel + consonant sequence of the base."
+sources = ["Hayes, B. (2009). Introductory Phonology. Wiley-Blackwell."]
+compilable = true
+
+[[rules]]
+Id = "R1"
+Inr = [["+BOS"], ["-Syllabic"], ["+Syllabic"], ["-Syllabic"]]
+Trm = []
+Dir = "L"
+Out = "(INR[1] INR[2] INR[3] INR[4] INR[2] INR[3] INR[4])"
