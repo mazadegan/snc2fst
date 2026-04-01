@@ -93,10 +93,10 @@ Compiles all rules to FSTs and writes them to `transducers/` (or a directory of 
 
 ```bash
 snc export config.toml            # print to stdout as plain text
-snc export config.toml -f latex -o grammar.tex
+snc export config.toml -f latex -o output.tex
 ```
 
-Exports the alphabet and all rules in a human-readable format optimized for communication. Plain text uses DSL-style notation; LaTeX uses formal mathematical notation suitable for inclusion in a paper. To share the grammar with collaborators as source, just share the project files directly.
+Exports the alphabet and all rules in a human-readable format. Plain text uses DSL-style notation; LaTeX uses mathematical notation suitable for inclusion in a paper (WIP). To share the grammar with collaborators as source, just share the project files directly.
 
 | Flag | Description |
 |------|-------------|
