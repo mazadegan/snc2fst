@@ -36,6 +36,8 @@ Sources/references (optional):enter one per line, blank line to finish:
 
 Full language names (`Turkish`) are accepted and automatically resolved to their ISO 639-3 code, or you can enter the code directly (`tur`).
 
+### Starting from a starter project
+
 To start from one of the built-in starter projects instead:
 
 ```bash
