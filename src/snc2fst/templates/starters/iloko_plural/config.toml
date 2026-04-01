@@ -13,5 +13,5 @@ Id = "R1"
 Inr = [["+BOS"], ["-Syllabic"], ["+Syllabic"], ["-Syllabic"]]
 Trm = []
 Dir = "L"
-#Out = "(INR[1] INR[2] INR[3] INR[4] INR[2] INR[3] INR[4])"
 Out = "(INR[1:4] INR[2:4])"
+#Out = "(INR[1] INR[2] INR[3] INR[4] INR[2] INR[3] INR[4])"
