@@ -52,7 +52,7 @@ def test_starter_test_cases_pass(name):
     with importlib.resources.as_file(d.joinpath("alphabet.csv")) as path:
         alphabet = load_alphabet(path)
 
-    with importlib.resources.as_file(d.joinpath("tests.tsv")) as path:
+    with importlib.resources.as_file(d.joinpath(config.tests_path)) as path:
         tests = load_tests(path)
 
     out_asts = {rule.Id: dsl.parse(rule.Out) for rule in config.rules}
@@ -119,7 +119,7 @@ def test_starter_fst_agrees(name):
     with importlib.resources.as_file(d.joinpath("alphabet.csv")) as path:
         alphabet = load_alphabet(path)
 
-    with importlib.resources.as_file(d.joinpath("tests.tsv")) as path:
+    with importlib.resources.as_file(d.joinpath(config.tests_path)) as path:
         tests = load_tests(path)
 
     failures = []

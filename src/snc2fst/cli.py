@@ -174,10 +174,14 @@ def init(filename, from_starter, pick_starter):
             raise click.Abort()
 
         source_dir = starters_dir.joinpath(from_starter)
+        import tomllib
+        raw_config = tomllib.loads(source_dir.joinpath("config.toml").read_text())
+        tests_filename = raw_config.get("tests_path", "tests.tsv")
+        alphabet_filename = raw_config.get("alphabet_path", "alphabet.csv")
         source_files = [
             (config_path, source_dir.joinpath("config.toml")),
-            (dir_path / "alphabet.csv", source_dir.joinpath("alphabet.csv")),
-            (dir_path / "tests.tsv", source_dir.joinpath("tests.tsv")),
+            (dir_path / alphabet_filename, source_dir.joinpath(alphabet_filename)),
+            (dir_path / tests_filename, source_dir.joinpath(tests_filename)),
         ]
     else:
         source_files = [
