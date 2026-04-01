@@ -236,7 +236,7 @@ Inr = [["+Syllabic"], ["-Syllabic", "+Dorsal"], ["+Syllabic"]]
 Out = "(INR[1] INR[3])"
 ```
 
-**R3: Lenition.** Underspecified voiceless stops become dorsal (i.e., /K/ surfaces as /k/ when not deleted):
+**R3: Feature-filling.** Underspecified voiceless stops become dorsal (i.e., /K/ surfaces as /k/ when not deleted):
 
 ```toml
 Inr = [["-Syllabic", "-Voice", "-Continuant"]]
