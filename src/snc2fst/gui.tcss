@@ -10,8 +10,8 @@ WelcomeScreen {
 
 #project-sidebar {
     width: 22;
-    height: 100%;
-    border-right: solid $primary-darken-2;
+    height: 1fr;
+    border-left: solid $primary-darken-2;
     padding: 1;
 }
 
@@ -29,7 +29,7 @@ WelcomeScreen {
 }
 
 #project-main {
-    height: 100%;
+    height: 1fr;
     width: 1fr;
 }
 
@@ -38,13 +38,33 @@ WelcomeScreen {
     width: 100%;
 }
 
-#project-log {
-    height: 6;
+#project-status {
+    height: 1;
     width: 100%;
-    border-top: solid $primary-darken-2;
+    background: $surface-darken-1;
+    text-align: right;
     padding: 0 1;
-    overflow-y: auto;
-    color: $warning;
+}
+
+#project-status:hover {
+    background: $surface;
+}
+
+#log-modal-body {
+    height: 1fr;
+    padding: 1 2;
+}
+
+.log-error {
+    margin-bottom: 1;
+}
+
+.log-warning {
+    margin-bottom: 1;
+}
+
+#log-modal-ok {
+    color: $success;
 }
 
 NewProjectScreen {

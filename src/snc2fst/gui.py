@@ -3,6 +3,8 @@ import json
 from pathlib import Path
 
 from textual.app import App, ComposeResult
+from textual.command import Provider, Hit, Hits
+from textual.events import Click
 from textual.message import Message
 from textual.screen import Screen
 from textual.suggester import Suggester
@@ -350,11 +352,63 @@ class NewProjectScreen(Screen):
 
         add_recent(title, config_path)
         self.app.pop_screen()
-        self.app.push_screen(ProjectScreen(config_path))
+        self.app.open_project(directory)
 
 
 # ---------------------------------------------------------------------------
-# Project screen (stub — main editor to be built here)
+# Command palette providers
+# ---------------------------------------------------------------------------
+
+class ProjectCommands(Provider):
+    """Commands available when a project is open."""
+
+    async def search(self, query: str) -> Hits:
+        screen = self.screen
+        if not isinstance(screen, ProjectScreen):
+            return
+        matcher = self.matcher(query)
+
+        hit = matcher.match("Show errors and warnings")
+        if hit > 0:
+            yield Hit(
+                hit,
+                matcher.highlight("Show errors and warnings"),
+                screen.action_show_log,
+                help="Open the validation log",
+            )
+
+
+# ---------------------------------------------------------------------------
+# Validation log modal
+# ---------------------------------------------------------------------------
+
+class ValidationLogModal(Screen):
+    """Full-screen modal showing validation errors and warnings."""
+
+    BINDINGS = [("escape", "dismiss_modal", "Close"), ("q", "dismiss_modal", "Close")]
+
+    def __init__(self, errors: list[str], warnings: list[str]) -> None:
+        super().__init__()
+        self._errors = errors
+        self._warnings = warnings
+
+    def compose(self) -> ComposeResult:
+        yield Header()
+        with ScrollableContainer(id="log-modal-body"):
+            if not self._errors and not self._warnings:
+                yield Static("✓ No errors or warnings.", id="log-modal-ok")
+            for e in self._errors:
+                yield Static(f"[red]✗[/red] {e}", markup=True, classes="log-error")
+            for w in self._warnings:
+                yield Static(f"[yellow]⚠[/yellow] {w}", markup=True, classes="log-warning")
+        yield Footer()
+
+    def action_dismiss_modal(self) -> None:
+        self.app.pop_screen()
+
+
+# ---------------------------------------------------------------------------
+# Project screen
 # ---------------------------------------------------------------------------
 
 class ProjectScreen(Screen):
@@ -374,13 +428,12 @@ class ProjectScreen(Screen):
         self._alphabet_path = self._dir / raw.get("alphabet_path", "alphabet.csv")
         self._tests_path = self._dir / raw.get("tests_path", "tests.csv")
         self._active_path = self._config_path
+        self._val_errors: list[str] = []
+        self._val_warnings: list[str] = []
 
     def compose(self) -> ComposeResult:
         yield Header()
         with Horizontal(id="project-body"):
-            with Vertical(id="project-sidebar"):
-                yield Label(self._dir.name, id="sidebar-title")
-                yield DirectoryTree(str(self._dir), id="project-tree")
             with Vertical(id="project-main"):
                 yield TextArea(
                     self._config_path.read_text(),
@@ -389,7 +442,10 @@ class ProjectScreen(Screen):
                     theme="vscode_dark",
                     tab_behavior="indent",
                 )
-        yield Static("", id="project-log")
+            with Vertical(id="project-sidebar"):
+                yield Label(self._dir.name, id="sidebar-title")
+                yield DirectoryTree(str(self._dir), id="project-tree")
+        yield Static("", id="project-status", markup=True)
         yield Footer()
 
     def on_mount(self) -> None:
@@ -418,21 +474,27 @@ class ProjectScreen(Screen):
         self._validate()
 
     def _validate(self) -> None:
-        import io, contextlib
         from snc2fst.cli import _run_validate
-        stderr_buf = io.StringIO()
-        with contextlib.redirect_stderr(stderr_buf):
-            result = _run_validate(self._config_path)
-        log = self.query_one("#project-log", Static)
-        errors = stderr_buf.getvalue().strip()
+        result = _run_validate(self._config_path)
+        self._val_errors = result.errors
+        self._val_warnings = result.warnings
+        status = self.query_one("#project-status", Static)
         if result.ok and not result.warnings:
-            log.update("✓ No errors")
+            status.update("[green]✓ No errors[/green]")
         else:
-            lines = []
-            if errors:
-                lines.append(errors)
-            lines.extend(result.warnings)
-            log.update("\n".join(lines))
+            parts = []
+            if result.errors:
+                parts.append(f"[red]✗ {len(result.errors)} error{'s' if len(result.errors) != 1 else ''}[/red]")
+            if result.warnings:
+                parts.append(f"[yellow]⚠ {len(result.warnings)} warning{'s' if len(result.warnings) != 1 else ''}[/yellow]")
+            status.update("  ·  ".join(parts))
+
+    def on_click(self, event: Click) -> None:
+        if getattr(event.widget, "id", None) == "project-status":
+            self.action_show_log()
+
+    def action_show_log(self) -> None:
+        self.app.push_screen(ValidationLogModal(self._val_errors, self._val_warnings))
 
     def action_close(self) -> None:
         self.app.pop_screen()
@@ -505,14 +567,14 @@ class WelcomeScreen(Screen):
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         index = int(event.item.id.split("-")[-1])
         entry = _load_recent()[index]
-        self.app.open_project(Path(entry["path"]))
+        self.app.open_project(Path(entry["path"]).parent)
 
     async def _pick_and_open(self) -> None:
         import asyncio
         try:
             proc = await asyncio.create_subprocess_exec(
                 "osascript", "-e",
-                'POSIX path of (choose file with prompt "Open snc2fst project")',
+                'POSIX path of (choose folder with prompt "Open snc2fst project")',
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -533,6 +595,7 @@ class SncApp(App):
 
     TITLE = "snc2fst"
     CSS_PATH = "gui.tcss"
+    COMMANDS = App.COMMANDS | {ProjectCommands}
     BINDINGS = [
         ("ctrl+q", "quit", "Quit"),
     ]
@@ -541,25 +604,21 @@ class SncApp(App):
         self.theme = "rose-pine-moon"
         self.push_screen(WelcomeScreen())
 
-    def open_project(self, config_path: Path) -> None:
-        """Validate and open a project, updating the recent list."""
+    def open_project(self, directory: Path) -> None:
+        """Open a project directory, updating the recent list."""
+        config_path = directory / "config.toml"
+        if not directory.is_dir():
+            self.notify(f"Not a directory: {directory}", severity="error")
+            return
+        if not config_path.exists():
+            self.notify(f"No config.toml found in {directory.name}.", severity="error")
+            return
         import tomllib
-        from snc2fst.models import GrammarConfig
-        from pydantic import ValidationError
-        if config_path.suffix != ".toml":
-            self.notify("Please select a .toml project file.", severity="error")
-            return
         try:
-            with open(config_path, "rb") as f:
-                raw = tomllib.load(f)
-            config = GrammarConfig(**raw)
-        except FileNotFoundError:
-            self.notify(f"File not found: {config_path}", severity="error")
-            return
-        except (tomllib.TOMLDecodeError, ValidationError) as e:
-            self.notify(f"Invalid project file: {e}", severity="error")
-            return
-        title = getattr(getattr(config, "meta", None), "title", None) or config_path.stem
+            raw = tomllib.loads(config_path.read_text())
+            title = raw.get("meta", {}).get("title") or directory.name
+        except Exception:
+            title = directory.name
         add_recent(title, config_path)
         self.push_screen(ProjectScreen(config_path))
 

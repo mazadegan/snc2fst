@@ -227,15 +227,17 @@ class _ValidationResult:
     config: object = None
     alphabet: dict = dc_field(default_factory=dict)
     tests: list = dc_field(default_factory=list)
+    errors: list[str] = dc_field(default_factory=list)
     warnings: list[str] = dc_field(default_factory=list)
     ok: bool = True
 
 
 def _run_validate(config_path: Path, verbose: bool = False) -> _ValidationResult:
-    """Run all validation checks, printing results if verbose.
+    """Run all validation checks, collecting errors and warnings into the result.
 
-    Returns a _ValidationResult. If ok=False, at least one hard error was found
-    and the result's config/alphabet/tests may be incomplete.
+    If ok=False, at least one hard error was found and the result's
+    config/alphabet/tests may be incomplete.
+    If verbose=True, also prints results to stdout/stderr for CLI use.
     """
     result = _ValidationResult()
     base_dir = config_path.parent
@@ -245,14 +247,22 @@ def _run_validate(config_path: Path, verbose: bool = False) -> _ValidationResult
             click.echo(msg)
 
     def error(msg):
-        click.echo(msg, err=True)
+        result.errors.append(msg)
+        result.ok = False
+        if verbose:
+            click.echo(msg, err=True)
+
+    def warn(msg):
+        result.warnings.append(msg)
+        if verbose:
+            click.echo(msg, err=True)
 
     # --- config.toml ---
     try:
         result.config = _load_config(config_path)
         info("  [✓] config.toml parsed successfully.")
     except ValidationError as e:
-        error("  [x] Configuration validation failed in config.toml:")
+        error("Configuration validation failed in config.toml:")
         for err in e.errors():
             parts = []
             for loc in err["loc"]:
@@ -264,12 +274,10 @@ def _run_validate(config_path: Path, verbose: bool = False) -> _ValidationResult
                     parts.append(str(loc))
             loc_str = "".join(parts)
             bad_input = repr(err.get("input", "Unknown"))
-            error(f"      - {loc_str}: {err['msg']} (Got: {bad_input})")
-        result.ok = False
+            error(f"  {loc_str}: {err['msg']} (got: {bad_input})")
         return result
     except Exception as e:
-        error(f"  [x] Failed to read config.toml:\n{e}")
-        result.ok = False
+        error(f"Failed to read config.toml: {e}")
         return result
 
     # --- alphabet ---
@@ -277,23 +285,19 @@ def _run_validate(config_path: Path, verbose: bool = False) -> _ValidationResult
         result.alphabet = load_alphabet(base_dir / result.config.alphabet_path)
         info(f"  [✓] {result.config.alphabet_path} loaded with {len(result.alphabet)} segments.")
     except FileNotFoundError:
-        error(f"  [x] Missing alphabet file: {base_dir / result.config.alphabet_path}")
-        result.ok = False
+        error(f"Missing alphabet file: {result.config.alphabet_path}")
         return result
     except Exception as e:
-        error(f"  [x] Failed to read alphabet file:\n{e}")
-        result.ok = False
+        error(f"Failed to read alphabet file: {e}")
         return result
 
     alph_errors, alph_warnings = check_alphabet(result.alphabet)
-    result.warnings.extend(alph_warnings)
     for w in alph_warnings:
+        warn(w)
         info(f"  [!] {w}")
     if alph_errors:
-        error("  [x] Alphabet segment errors:")
         for e in alph_errors:
-            error(f"      - {e}")
-        result.ok = False
+            error(e)
         return result
     if not alph_warnings:
         info("  [✓] All segments are distinguishable.")
@@ -308,13 +312,11 @@ def _run_validate(config_path: Path, verbose: bool = False) -> _ValidationResult
             for sign, feature_name in feature_spec:
                 if feature_name not in valid_features:
                     rule_errors.append(
-                        f"Rule '{rule.Id}' uses undefined feature '{feature_name}'."
+                        f"Rule '{rule.Id}': undefined feature '{feature_name}'."
                     )
+    for e in rule_errors:
+        error(e)
     if rule_errors:
-        error("  [x] Feature validation failed:")
-        for e in rule_errors:
-            error(f"      - {e}")
-        result.ok = False
         return result
     info("  [✓] All rule features match the alphabet matrix.")
 
@@ -337,11 +339,9 @@ def _run_validate(config_path: Path, verbose: bool = False) -> _ValidationResult
                 valid_features=valid_features,
             )
         )
+    for e in out_errors:
+        error(e)
     if out_errors:
-        error("  [x] Out expression validation failed:")
-        for e in out_errors:
-            error(f"      - {e}")
-        result.ok = False
         return result
     info("  [✓] All Out expressions are syntactically valid.")
 
@@ -354,12 +354,10 @@ def _run_validate(config_path: Path, verbose: bool = False) -> _ValidationResult
                 _check_compilable(rule)
             except CompileError as e:
                 compile_errors.append(str(e))
+        for e in compile_errors:
+            error(e)
         if compile_errors:
-            error("  [x] Compilability check failed (compilable = true in [meta]):")
-            for e in compile_errors:
-                error(f"      - {e}")
-            error("      Set compilable = false in [meta] to use the evaluator only.")
-            result.ok = False
+            error("Set compilable = false in [meta] to use the evaluator only.")
             return result
         info("  [✓] All rules are compilable to FSTs.")
 
@@ -368,12 +366,10 @@ def _run_validate(config_path: Path, verbose: bool = False) -> _ValidationResult
         result.tests = load_tests(base_dir / result.config.tests_path)
         info(f"  [✓] {result.config.tests_path} loaded with {len(result.tests)} test cases.")
     except FileNotFoundError:
-        error(f"  [x] Missing tests file: {base_dir / result.config.tests_path}")
-        result.ok = False
+        error(f"Missing tests file: {result.config.tests_path}")
         return result
     except Exception as e:
-        error(f"  [x] Failed to read tests file:\n{e}")
-        result.ok = False
+        error(f"Failed to read tests file: {e}")
         return result
 
     tok_errors = []
@@ -383,11 +379,9 @@ def _run_validate(config_path: Path, verbose: bool = False) -> _ValidationResult
                 tokenize(word_str, result.alphabet)
             except TokenizeError as e:
                 tok_errors.append(f"Test {i} {label} '{word_str}': {e}")
+    for e in tok_errors:
+        error(e)
     if tok_errors:
-        error("  [x] Test word tokenization failed:")
-        for e in tok_errors:
-            error(f"      - {e}")
-        result.ok = False
         return result
     info("  [✓] All test words tokenize unambiguously.")
 
@@ -401,6 +395,10 @@ def validate(config_file):
     config_path = Path(config_file)
     click.echo(f"Validating project at: {config_path}")
     result = _run_validate(config_path, verbose=True)
+    for e in result.errors:
+        click.echo(f"  [x] {e}", err=True)
+    for w in result.warnings:
+        click.echo(f"  [!] {w}", err=True)
     if not result.ok:
         raise click.Abort()
     click.echo("All files valid.")
