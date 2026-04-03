@@ -1,0 +1,24 @@
+<div class="results-header">
+  {% if error %}
+  <span class="status-error">&#10007; {{ error }}</span>
+  {% else %}
+  <span class="status-ok">&#10003; Compiled {{ rows | length }} rule{{ 's' if rows | length != 1 else '' }}</span>
+  {% if out_path %}<span class="results-path">&#8594; {{ out_path }}</span>{% endif %}
+  {% endif %}
+  <button class="close-results" onclick="document.getElementById('results-panel').classList.add('hidden')">&#10005;</button>
+</div>
+{% if rows %}
+<table class="results-table">
+  <thead><tr><th>Rule</th><th>States</th><th>Arcs</th><th>File</th></tr></thead>
+  <tbody>
+  {% for row in rows %}
+  <tr>
+    <td>{{ row.rule_id }}</td>
+    <td>{{ "{:,}".format(row.states) }}</td>
+    <td>{{ "{:,}".format(row.arcs) }}</td>
+    <td>{{ row.filename }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}

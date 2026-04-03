@@ -1,0 +1,25 @@
+{% for entry in tree recursive %}
+  {% if entry.is_dir %}
+  <details class="tree-node tree-folder" {% if entry.is_open %}open{% endif %}>
+    <summary class="tree-dir">
+      <i data-lucide="{{ entry.icon }}" class="tree-icon" aria-hidden="true"></i>
+      <span class="tree-label">{{ entry.name }}</span>
+    </summary>
+    <div class="tree-children">
+      {{ loop(entry.children) }}
+    </div>
+  </details>
+  {% else %}
+  <button
+    type="button"
+    class="tree-node tree-file{% if entry.is_active %} is-active{% endif %}"
+    data-path="{{ entry.path }}"
+    hx-get="/api/file?path={{ entry.path | urlencode }}&config_path={{ config_path | urlencode }}"
+    hx-target="#editor-wrap"
+    hx-swap="innerHTML"
+    hx-on::after-request="window.setActiveTreeFile && window.setActiveTreeFile(this.dataset.path)">
+    <i data-lucide="{{ entry.icon }}" class="tree-icon" aria-hidden="true"></i>
+    <span class="tree-label">{{ entry.name }}</span>
+  </button>
+  {% endif %}
+{% endfor %}

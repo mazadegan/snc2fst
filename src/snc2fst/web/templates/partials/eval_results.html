@@ -1,0 +1,24 @@
+<div class="results-header">
+  <strong>{{ passed }}/{{ total }} passed</strong>
+  {% if failed %}<span class="status-error">  {{ failed }} failed</span>{% endif %}
+  {% if errors %}<span class="status-warning">  {{ errors }} errors</span>{% endif %}
+  <button class="close-results" onclick="document.getElementById('results-panel').classList.add('hidden')">&#10005;</button>
+</div>
+<table class="results-table">
+  <thead><tr><th>#</th><th>Input</th><th>Output</th><th>Expected</th><th></th></tr></thead>
+  <tbody>
+  {% for row in rows %}
+  <tr class="row-{{ row.status }}">
+    <td>{{ row.index }}</td>
+    <td>{{ row.input }}</td>
+    <td>{{ row.output }}</td>
+    <td>{{ row.expected }}</td>
+    <td>
+      {% if row.status == 'pass' %}<span class="status-ok">&#10003;</span>
+      {% elif row.status == 'fail' %}<span class="status-error">&#10007;</span>
+      {% else %}<span class="status-warning">&#9888; {{ row.message }}</span>{% endif %}
+    </td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>

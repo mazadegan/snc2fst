@@ -1,0 +1,196 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} — snc2fst{% endblock %}
+{% block body %}
+<div class="app-layout">
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <a href="/" class="sidebar-home" title="Home">&#8592;</a>
+      <span class="sidebar-title">{{ title }}</span>
+    </div>
+    <div id="file-tree" class="file-tree">
+      {% include "partials/tree.html" %}
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <div class="main-col">
+    <div id="editor-wrap" class="editor-wrap">
+      {% include "partials/editor.html" %}
+    </div>
+
+    <!-- Results panel (hidden until eval/compile) -->
+    <div id="results-panel" class="results-panel hidden"></div>
+  </div>
+
+</div>
+
+<!-- Status bar -->
+<div class="statusbar">
+  <div
+    id="status-area"
+    class="status-area"
+    hx-post="/api/validate"
+    hx-trigger="load"
+    hx-include="#hidden-config">
+    {% include "partials/status.html" %}
+  </div>
+  <div class="statusbar-actions">
+    <span class="statusbar-btn"
+      hx-post="/api/eval"
+      hx-include="#eval-settings, #hidden-config"
+      hx-target="#results-panel"
+      hx-indicator="#spinner"
+      hx-on::after-request="document.getElementById('results-panel').classList.remove('hidden')"
+      title="ctrl+e">&#9654; Eval</span>
+    <span class="statusbar-btn"
+      hx-post="/api/compile"
+      hx-include="#compile-settings, #hidden-config"
+      hx-target="#results-panel"
+      hx-indicator="#spinner"
+      hx-on::after-request="document.getElementById('results-panel').classList.remove('hidden')"
+      title="ctrl+m">&#9881; Compile</span>
+    <button id="theme-toggle" class="statusbar-btn statusbar-icon-btn" type="button" aria-label="Toggle theme"></button>
+    <span id="spinner" class="spinner htmx-indicator">&#9679;&#9679;&#9679;</span>
+  </div>
+</div>
+
+<!-- Hidden inputs for config path and settings -->
+<input type="hidden" id="hidden-config" name="config_path" value="{{ config_path }}">
+<div id="eval-settings" style="display:none">
+  <input type="hidden" name="use_fst" value="false">
+</div>
+<div id="compile-settings" style="display:none">
+  <input type="hidden" name="fmt" value="fst">
+  <input type="hidden" name="max_arcs" value="1000000">
+  <input type="hidden" name="no_optimize" value="false">
+</div>
+
+<script>
+(function () {
+  function closeProblems() {
+    document.querySelectorAll('[data-problems-popover]').forEach(function (popover) {
+      popover.classList.add('hidden');
+    });
+    document.querySelectorAll('.problems-wrap').forEach(function (wrap) {
+      wrap.classList.remove('is-open');
+    });
+    document.querySelectorAll('[data-problems-toggle]').forEach(function (toggle) {
+      toggle.setAttribute('aria-expanded', 'false');
+    });
+  }
+
+  document.querySelectorAll('.tree-folder').forEach(function (folder) {
+    folder.addEventListener('toggle', function () {
+      const icon = folder.querySelector('.tree-dir .tree-icon');
+      if (!icon) return;
+      icon.setAttribute('data-lucide', folder.open ? 'folder-open' : 'folder');
+      if (window.lucide) {
+        window.lucide.createIcons();
+      }
+    });
+  });
+
+  window.setActiveTreeFile = function (path) {
+    document.querySelectorAll('.tree-file.is-active').forEach(function (node) {
+      node.classList.remove('is-active');
+    });
+    const activeNode = document.querySelector('.tree-file[data-path="' + CSS.escape(path) + '"]');
+    if (activeNode) {
+      activeNode.classList.add('is-active');
+    }
+  };
+
+  function initEditor(textarea) {
+    if (!textarea) return null;
+    const lang = textarea.dataset.lang || 'toml';
+    const cm = CodeMirror.fromTextArea(textarea, {
+      mode: lang,
+      theme: 'default',
+      lineNumbers: true,
+      indentWithTabs: false,
+      tabSize: 2,
+      lineWrapping: true,
+      autofocus: true,
+    });
+    cm.setOption('extraKeys', {
+      'Ctrl-S': saveFile,
+      'Cmd-S': saveFile,
+    });
+    window._cm = cm;
+    return cm;
+  }
+
+  const textarea = document.getElementById('cm-source');
+  if (!textarea) return;
+
+  initEditor(textarea);
+
+  document.addEventListener('click', function (event) {
+    const toggle = event.target.closest('[data-problems-toggle]');
+    if (toggle) {
+      const wrap = toggle.closest('.problems-wrap');
+      const popover = wrap ? wrap.querySelector('[data-problems-popover]') : null;
+      if (!popover) return;
+      const willOpen = popover.classList.contains('hidden');
+      closeProblems();
+      popover.classList.toggle('hidden', !willOpen);
+      if (wrap) {
+        wrap.classList.toggle('is-open', willOpen);
+      }
+      toggle.setAttribute('aria-expanded', String(willOpen));
+      return;
+    }
+
+    if (!event.target.closest('.problems-wrap')) {
+      closeProblems();
+    }
+  });
+
+  document.addEventListener('keydown', function (event) {
+    if (event.key === 'Escape') {
+      closeProblems();
+    }
+  });
+
+  // Keyboard shortcuts for eval/compile
+  document.addEventListener('keydown', function (e) {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'e') {
+      e.preventDefault();
+      document.querySelector('[hx-post="/api/eval"]').click();
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key === 'm') {
+      e.preventDefault();
+      document.querySelector('[hx-post="/api/compile"]').click();
+    }
+  });
+
+  function saveFile() {
+    const cm = window._cm;
+    if (!cm) return;
+    const content = cm.getValue();
+    const activePath = document.getElementById('active-file-path').value;
+    const configPath = document.getElementById('hidden-config').value;
+    const formData = new FormData();
+    formData.append('path', activePath);
+    formData.append('content', content);
+    formData.append('config_path', configPath);
+    fetch('/api/file', { method: 'POST', body: formData })
+      .then(r => r.text())
+      .then(html => {
+        document.getElementById('status-area').innerHTML = html;
+        htmx.process(document.getElementById('status-area'));
+      });
+  }
+
+  // Re-init CodeMirror when editor partial is swapped by HTMX
+  document.body.addEventListener('htmx:afterSwap', function (e) {
+    if (e.detail.target.id === 'editor-wrap') {
+      const ta = document.getElementById('cm-source');
+      initEditor(ta);
+    }
+  });
+})();
+</script>
+{% endblock %}

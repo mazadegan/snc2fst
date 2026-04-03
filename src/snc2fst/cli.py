@@ -835,10 +835,28 @@ def export_cmd(config_file, fmt, output):
 
 
 @main.command("gui")
-def gui_cmd():
-    """Open the snc2fst GUI."""
-    from snc2fst.gui import run
-    run()
+@click.option("--port", default=0, help="Port to listen on (0 = random free port).")
+@click.option("--no-browser", is_flag=True, help="Don't open a browser window.")
+def gui_cmd(port: int, no_browser: bool):
+    """Launch the snc2fst web GUI."""
+    import socket
+    import threading
+    import webbrowser
+    import uvicorn
+    from snc2fst.web.app import app
+
+    if port == 0:
+        with socket.socket() as s:
+            s.bind(("127.0.0.1", 0))
+            port = s.getsockname()[1]
+
+    url = f"http://127.0.0.1:{port}"
+    click.echo(f"Starting snc2fst GUI at {url}")
+
+    if not no_browser:
+        threading.Timer(0.5, lambda: webbrowser.open(url)).start()
+
+    uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")
 
 
 if __name__ == "__main__":

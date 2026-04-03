@@ -1,0 +1,3 @@
+<input type="hidden" id="active-file-path" value="{{ active_file }}">
+<div class="editor-filename">{{ file_name }}</div>
+<textarea id="cm-source" class="editor-source" data-lang="{% if file_name.endswith('.toml') %}toml{% elif file_name.endswith('.csv') or file_name.endswith('.tsv') %}csv{% else %}null{% endif %}">{{ file_content }}</textarea>

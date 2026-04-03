@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}snc2fst{% endblock %}
+{% block body %}
+<div class="welcome-wrap">
+  <div class="welcome-card">
+    <pre class="logo">╭─╮╭╮╷╭─╴╭─╮╭─╴╭─╮╶┬╴
+╰─╮│╰┤│  ╭─╯├╴ ╰─╮ │ 
+╰─╯╵ ╵╰─╴╰─╴╵  ╰─╯ ╵ </pre>
+    <p class="subtitle">Search &amp; Change rule authoring tool</p>
+
+    <div class="welcome-actions">
+      <button class="action-btn primary" onclick="document.getElementById('new-project-dialog').showModal()">New Project</button>
+      <button class="action-btn" onclick="document.getElementById('open-dialog').showModal()">Open Project</button>
+    </div>
+
+    {% if recent %}
+    <div class="recent-section">
+      <div class="recent-label">Recent Projects</div>
+      <ul class="recent-list">
+        {% for entry in recent %}
+        <li>
+          <a class="recent-item" href="/project?path={{ entry.path | urlencode }}">
+            <span class="recent-title">{{ entry.title }}</span>
+            <span class="recent-path">{{ entry.path }}</span>
+          </a>
+        </li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+<!-- New Project Dialog -->
+<dialog id="new-project-dialog" class="modal">
+  <form method="POST" action="/api/project/new">
+    <h2 class="modal-title">New Project</h2>
+
+    <label>Title
+      <input type="text" name="title" placeholder="My Grammar" required>
+    </label>
+
+    <label>Language
+      <input type="text" name="language" placeholder="eng" required>
+    </label>
+
+    <label>Description
+      <input type="text" name="description" placeholder="Optional">
+    </label>
+
+    <label>Directory
+      <input type="text" name="directory" placeholder="~/projects/my-grammar" required>
+    </label>
+
+    <label>Starter
+      <select name="starter">
+        <option value="">Blank project</option>
+        {% for s in starters %}
+        <option value="{{ s }}">{{ s }}</option>
+        {% endfor %}
+      </select>
+    </label>
+
+    <label>Sources (one per line)
+      <textarea name="sources" rows="3" placeholder="Author (Year) Title"></textarea>
+    </label>
+
+    <div class="modal-actions">
+      <button type="submit" class="action-btn primary">Create</button>
+      <button type="button" class="action-btn" onclick="this.closest('dialog').close()">Cancel</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Open Project Dialog -->
+<dialog id="open-dialog" class="modal">
+  <form onsubmit="openProject(event)">
+    <h2 class="modal-title">Open Project</h2>
+    <label>Path to config.toml
+      <input type="text" id="open-path" placeholder="~/projects/my-grammar/config.toml" required>
+    </label>
+    <div class="modal-actions">
+      <button type="submit" class="action-btn primary">Open</button>
+      <button type="button" class="action-btn" onclick="this.closest('dialog').close()">Cancel</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+function openProject(e) {
+  e.preventDefault();
+  const path = document.getElementById('open-path').value.trim();
+  if (path) window.location.href = '/project?path=' + encodeURIComponent(path);
+}
+</script>
+{% endblock %}
