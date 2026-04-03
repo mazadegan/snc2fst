@@ -239,9 +239,462 @@
     }
   };
 
+  function parseDelimited(text, delimiter) {
+    const rows = [];
+    let row = [];
+    let cell = '';
+    let inQuotes = false;
+
+    for (let i = 0; i < text.length; i += 1) {
+      const char = text[i];
+      const next = text[i + 1];
+      if (inQuotes) {
+        if (char === '"' && next === '"') {
+          cell += '"';
+          i += 1;
+        } else if (char === '"') {
+          inQuotes = false;
+        } else {
+          cell += char;
+        }
+      } else if (char === '"') {
+        inQuotes = true;
+      } else if (char === delimiter) {
+        row.push(cell);
+        cell = '';
+      } else if (char === '\n') {
+        row.push(cell);
+        rows.push(row);
+        row = [];
+        cell = '';
+      } else if (char === '\r') {
+        continue;
+      } else {
+        cell += char;
+      }
+    }
+
+    row.push(cell);
+    if (row.length > 1 || row[0] !== '' || rows.length) {
+      rows.push(row);
+    }
+
+    return rows;
+  }
+
+  function serializeDelimited(rows, delimiter) {
+    return rows.map(function (row) {
+      return row.map(function (value) {
+        const text = String(value ?? '');
+        if (text.includes('"') || text.includes('\n') || text.includes('\r') || text.includes(delimiter)) {
+          return '"' + text.replace(/"/g, '""') + '"';
+        }
+        return text;
+      }).join(delimiter);
+    }).join('\n');
+  }
+
+  function getTableKind(fileName) {
+    if (/^alphabet\.csv$/i.test(fileName)) return 'alphabet';
+    if (/^tests\.(csv|tsv)$/i.test(fileName)) return 'tests';
+    return 'generic';
+  }
+
+  function normalizeRows(rows) {
+    const width = rows.reduce(function (max, row) {
+      return Math.max(max, row.length);
+    }, 0);
+    return rows.map(function (row) {
+      return Array.from({ length: width }, function (_, index) {
+        return row[index] ?? '';
+      });
+    });
+  }
+
+  function rowsToObjects(rows, columns) {
+    return rows.map(function (row, rowIndex) {
+      const record = { _rowId: rowIndex };
+      columns.forEach(function (column, index) {
+        record[column.field] = row[index] ?? '';
+      });
+      return record;
+    });
+  }
+
+  function tableToRows(table, columns) {
+    return table.getData().map(function (record) {
+      return columns.map(function (column) {
+        return record[column.field] ?? '';
+      });
+    });
+  }
+
+  function renderTableToolbar(state) {
+    const toolbar = document.getElementById('table-toolbar');
+    if (!toolbar) return;
+
+    let actions = [];
+    if (state.tableKind === 'tests') {
+      actions = [
+        { action: 'add-row', label: 'Add test' },
+        { action: 'delete-row', label: 'Delete test' },
+      ];
+    } else if (state.tableKind === 'alphabet') {
+      actions = [
+        { action: 'add-feature', label: 'Add feature' },
+        { action: 'delete-feature', label: 'Delete feature' },
+        { action: 'add-segment', label: 'Add segment' },
+        { action: 'delete-segment', label: 'Delete segment' },
+      ];
+    }
+
+    toolbar.innerHTML = actions.map(function (item) {
+      return '<button type="button" class="table-toolbar-btn" data-table-action="' + item.action + '">' + item.label + '</button>';
+    }).join('');
+
+    toolbar.querySelectorAll('[data-table-action]').forEach(function (button) {
+      button.addEventListener('click', function () {
+        const selectedRow = state.table && typeof state.table.getSelectedRows === 'function'
+          ? state.table.getSelectedRows()[0] || null
+          : null;
+
+        if (button.dataset.tableAction === 'add-row') {
+          state.table.addRow({ _rowId: Date.now() }, false);
+        } else if (button.dataset.tableAction === 'delete-row') {
+          if (!selectedRow) return;
+          state.table.deleteRow(selectedRow.getIndex());
+          state.selectedRow = null;
+          state.selectedRowId = null;
+          updateTableToolbarState(state);
+        } else if (button.dataset.tableAction === 'add-feature') {
+          const name = window.prompt('Feature name');
+          if (!name) return;
+          const record = { _rowId: Date.now() };
+          state.columns.forEach(function (column, index) {
+            record[column.field] = index === 0 ? name : '0';
+          });
+          state.table.addRow(record, false);
+        } else if (button.dataset.tableAction === 'delete-feature') {
+          if (!selectedRow) return;
+          state.table.deleteRow(selectedRow.getIndex());
+          state.selectedRow = null;
+          state.selectedRowId = null;
+          updateTableToolbarState(state);
+        } else if (button.dataset.tableAction === 'add-segment') {
+          const name = window.prompt('Segment name');
+          if (!name) return;
+          const field = 'col_' + state.columns.length;
+          const column = {
+            title: name,
+            field: field,
+            editor: 'input',
+            headerSort: false,
+            headerClick: function (_e, column) {
+              selectColumn(state, column.getField());
+            },
+            editable: true,
+            formatter: function (cell) { return cell.getValue() ?? ''; },
+          };
+          state.columns.push(column);
+          Promise.resolve(state.table.addColumn(column, false)).then(function () {
+            return Promise.all(state.table.getRows().map(function (row) {
+              return row.update({ [field]: '0' });
+            }));
+          });
+        } else if (button.dataset.tableAction === 'delete-segment') {
+          if (!state.selectedColumn || state.selectedColumn.getField() === 'col_0') return;
+          const field = state.selectedColumn.getField();
+          state.selectedColumn.delete();
+          state.columns = state.columns.filter(function (column) {
+            return column.field !== field;
+          });
+          state.selectedColumn = null;
+          state.selectedColumnField = null;
+          updateTableToolbarState(state);
+        }
+      });
+    });
+
+    updateTableToolbarState(state);
+  }
+
+  function updateTableToolbarState(state) {
+    const toolbar = document.getElementById('table-toolbar');
+    if (!toolbar) return;
+    const selectedRow = state.table && typeof state.table.getSelectedRows === 'function'
+      ? state.table.getSelectedRows()[0] || null
+      : null;
+
+    toolbar.querySelectorAll('[data-table-action]').forEach(function (button) {
+      const action = button.dataset.tableAction;
+      let disabled = false;
+
+      if (action === 'delete-segment') {
+        disabled = !state.selectedColumn || state.selectedColumn.getField() === 'col_0';
+      }
+
+      button.disabled = disabled;
+    });
+  }
+
+  function clearTableSelection(state) {
+    if (!state || !state.table) return;
+    state.selectedRow = null;
+    state.selectedRowId = null;
+    state.selectedColumn = null;
+    state.selectedColumnField = null;
+    if (typeof state.table.deselectRow === 'function') {
+      state.table.deselectRow();
+    }
+    state.table.getRows().forEach(function (row) {
+      const element = row.getElement();
+      if (element) element.classList.remove('is-selected-row');
+    });
+    (state.columns || []).forEach(function (columnDef) {
+      const column = state.table.getColumn(columnDef.field);
+      if (!column) return;
+      const header = column.getElement();
+      if (header) header.classList.remove('is-selected-col');
+      column.getCells().forEach(function (cell) {
+        const cellElement = cell.getElement();
+        if (cellElement) cellElement.classList.remove('is-selected-col');
+      });
+    });
+    updateTableToolbarState(state);
+  }
+
+  function clearColumnSelection(state) {
+    state.selectedColumn = null;
+    state.selectedColumnField = null;
+    (state.columns || []).forEach(function (columnDef) {
+      const column = state.table.getColumn(columnDef.field);
+      if (!column) return;
+      const header = column.getElement();
+      if (header) header.classList.remove('is-selected-col');
+      column.getCells().forEach(function (cell) {
+        const cellElement = cell.getElement();
+        if (cellElement) cellElement.classList.remove('is-selected-col');
+      });
+    });
+  }
+
+  function syncSelectedRow(state, row) {
+    state.selectedRow = row;
+    state.selectedRowId = row ? row.getIndex() : null;
+    clearColumnSelection(state);
+
+    state.table.getRows().forEach(function (candidate) {
+      const element = candidate.getElement();
+      if (element) {
+        element.classList.toggle('is-selected-row', !!row && candidate === row);
+      }
+    });
+
+    updateTableToolbarState(state);
+  }
+
+  function selectRow(state, row) {
+    if (typeof row.select === 'function') {
+      row.select();
+    }
+  }
+
+  function selectColumn(state, field) {
+    clearTableSelection(state);
+    state.selectedRow = null;
+    state.selectedRowId = null;
+    const column = state.table.getColumn(field);
+    state.selectedColumn = column;
+    state.selectedColumnField = field;
+    if (!column) return;
+    const header = column.getElement();
+    if (header) header.classList.add('is-selected-col');
+    column.getCells().forEach(function (cell) {
+      const element = cell.getElement();
+      if (element) element.classList.add('is-selected-col');
+    });
+    updateTableToolbarState(state);
+  }
+
+  function createTestsTable(state, rows, tableContainer) {
+    const normalized = normalizeRows(rows.length ? rows : [['Input', 'Output']]);
+    const header = normalized[0] || ['Input', 'Output'];
+    const body = normalized.slice(1);
+    state.columns = header.map(function (title, index) {
+      return {
+        title: title || ('Column ' + (index + 1)),
+        field: 'col_' + index,
+        editor: 'input',
+        headerSort: false,
+        formatter: function (cell) { return cell.getValue() ?? ''; },
+      };
+    });
+
+    state.table = new Tabulator(tableContainer, {
+      data: rowsToObjects(body, state.columns),
+      columns: state.columns,
+      layout: 'fitDataStretch',
+      headerVisible: true,
+      reactiveData: false,
+      height: '100%',
+      index: '_rowId',
+      editTriggerEvent: 'dblclick',
+      selectableRows: 1,
+      movableRows: true,
+      addRowPos: 'bottom',
+      rowSelected: function (row) {
+        syncSelectedRow(state, row);
+      },
+      rowDeselected: function (_row) {
+        syncSelectedRow(state, null);
+      },
+      rowClick: function (_e, row) {
+        selectRow(state, row);
+      },
+      cellClick: function (_e, cell) {
+        selectRow(state, cell.getRow());
+      },
+    });
+  }
+
+  function createAlphabetTable(state, rows, tableContainer) {
+    const normalized = normalizeRows(rows.length ? rows : [['', ''], ['', '0']]);
+    const header = normalized[0];
+    const body = normalized.slice(1);
+    state.columns = header.map(function (title, index) {
+      return {
+        title: title,
+        field: 'col_' + index,
+        editor: 'input',
+        headerSort: false,
+        headerClick: function (_e, column) {
+          selectColumn(state, column.getField());
+        },
+        formatter: function (cell) { return cell.getValue() ?? ''; },
+      };
+    });
+
+    state.table = new Tabulator(tableContainer, {
+      data: rowsToObjects(body, state.columns),
+      columns: state.columns,
+      layout: 'fitDataStretch',
+      headerVisible: true,
+      reactiveData: false,
+      height: '100%',
+      index: '_rowId',
+      editTriggerEvent: 'dblclick',
+      selectableRows: 1,
+      addRowPos: 'bottom',
+      rowSelected: function (row) {
+        syncSelectedRow(state, row);
+      },
+      rowDeselected: function (_row) {
+        syncSelectedRow(state, null);
+      },
+      rowClick: function (_e, row) {
+        selectRow(state, row);
+      },
+      cellClick: function (_e, cell) {
+        selectRow(state, cell.getRow());
+      },
+    });
+  }
+
+  function serializeCurrentTable(state) {
+    if (!state.table) return state.cm.getValue();
+    const rows = tableToRows(state.table, state.columns || []);
+    if (state.tableKind === 'tests' || state.tableKind === 'alphabet') {
+      const header = (state.columns || []).map(function (column) {
+        return column.title ?? '';
+      });
+      return serializeDelimited([header].concat(rows), state.delimiter);
+    }
+    return serializeDelimited(rows, state.delimiter);
+  }
+
+  function setEditorViewMode(mode) {
+    const state = window._editorState;
+    if (!state || !state.isTabular) return;
+
+    const toggleButton = document.getElementById('editor-view-toggle-btn');
+    const tableContainer = document.getElementById('table-editor');
+    const toolbar = document.getElementById('table-toolbar');
+
+    if (mode === 'table') {
+      const rows = parseDelimited(state.cm.getValue(), state.delimiter);
+      state.selectedRowId = null;
+      state.selectedRow = null;
+      state.selectedColumn = null;
+      state.selectedColumnField = null;
+      tableContainer.innerHTML = '';
+      if (state.tableKind === 'tests') {
+        createTestsTable(state, rows, tableContainer);
+      } else if (state.tableKind === 'alphabet') {
+        createAlphabetTable(state, rows, tableContainer);
+      } else {
+        const normalized = normalizeRows(rows.length ? rows : [['']]);
+        state.columns = normalized[0].map(function (_value, index) {
+          return {
+            title: String(index + 1),
+            field: 'col_' + index,
+            editor: 'input',
+            headerSort: false,
+            formatter: function (cell) { return cell.getValue() ?? ''; },
+          };
+        });
+        state.table = new Tabulator(tableContainer, {
+          data: rowsToObjects(normalized, state.columns),
+          columns: state.columns,
+          layout: 'fitDataStretch',
+          headerVisible: false,
+          reactiveData: false,
+          height: '100%',
+          index: '_rowId',
+          editTriggerEvent: 'dblclick',
+          selectableRows: 1,
+        });
+      }
+      renderTableToolbar(state);
+      if (toolbar) toolbar.classList.remove('hidden');
+      tableContainer.classList.remove('hidden');
+      state.cm.getWrapperElement().classList.add('hidden');
+    } else {
+      if (state.table) {
+        state.cm.setValue(serializeCurrentTable(state));
+        state.table.destroy();
+        state.table = null;
+      }
+      if (toolbar) {
+        toolbar.classList.add('hidden');
+        toolbar.innerHTML = '';
+      }
+      tableContainer.classList.add('hidden');
+      state.cm.getWrapperElement().classList.remove('hidden');
+      state.cm.refresh();
+    }
+
+    state.mode = mode;
+    if (toggleButton) {
+      const nextMode = mode === 'source' ? 'table' : 'source';
+      const icon = nextMode === 'table' ? 'table' : 'code';
+      const label = nextMode === 'table' ? 'Switch to table view' : 'Switch to source view';
+      toggleButton.dataset.editorMode = nextMode;
+      toggleButton.setAttribute('aria-label', label);
+      toggleButton.setAttribute('title', label);
+      toggleButton.innerHTML = '<i data-lucide="' + icon + '" class="editor-view-icon" aria-hidden="true"></i>';
+      if (window.lucide) {
+        window.lucide.createIcons();
+      }
+    }
+  }
+
   function initEditor(textarea) {
     if (!textarea) return null;
     const lang = textarea.dataset.lang || 'toml';
+    const fileName = textarea.dataset.fileName || '';
+    const isTabular = lang === 'csv';
+    const tableKind = getTableKind(fileName);
+    const delimiter = fileName.endsWith('.tsv') ? '\t' : ',';
     const cm = CodeMirror.fromTextArea(textarea, {
       mode: lang,
       theme: 'default',
@@ -256,6 +709,27 @@
       'Cmd-S': saveFile,
     });
     window._cm = cm;
+    window._editorState = {
+      cm: cm,
+      mode: 'source',
+      isTabular: isTabular,
+      tableKind: tableKind,
+      delimiter: delimiter,
+      table: null,
+      columns: [],
+      selectedRow: null,
+      selectedRowId: null,
+      selectedColumn: null,
+      selectedColumnField: null,
+    };
+
+    const toggleButton = document.getElementById('editor-view-toggle-btn');
+    if (toggleButton) {
+      toggleButton.addEventListener('click', function () {
+        setEditorViewMode(toggleButton.dataset.editorMode || 'table');
+      });
+    }
+
     return cm;
   }
 
@@ -304,9 +778,11 @@
   });
 
   function saveFile() {
-    const cm = window._cm;
-    if (!cm) return;
-    const content = cm.getValue();
+    const state = window._editorState;
+    if (!state || !state.cm) return;
+    const content = state.mode === 'table' && state.table
+      ? serializeCurrentTable(state)
+      : state.cm.getValue();
     const activePath = document.getElementById('active-file-path').value;
     const configPath = document.getElementById('hidden-config').value;
     const formData = new FormData();

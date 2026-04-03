@@ -1,3 +1,26 @@
 <input type="hidden" id="active-file-path" value="{{ active_file }}">
-<div class="editor-filename">{{ file_name }}</div>
-<textarea id="cm-source" class="editor-source" data-lang="{% if file_name.endswith('.toml') %}toml{% elif file_name.endswith('.csv') or file_name.endswith('.tsv') %}csv{% else %}null{% endif %}">{{ file_content }}</textarea>
+<div class="editor-header">
+  <div class="editor-filename">{{ file_name }}</div>
+  {% if file_name.endswith('.csv') or file_name.endswith('.tsv') %}
+  <div class="editor-view-toggle">
+    <button
+      type="button"
+      class="editor-view-btn"
+      id="editor-view-toggle-btn"
+      data-editor-mode="table"
+      aria-label="Switch to table view"
+      title="Switch to table view">
+      <i data-lucide="table" class="editor-view-icon" aria-hidden="true"></i>
+    </button>
+  </div>
+  {% endif %}
+</div>
+<textarea
+  id="cm-source"
+  class="editor-source"
+  data-lang="{% if file_name.endswith('.toml') %}toml{% elif file_name.endswith('.csv') or file_name.endswith('.tsv') %}csv{% else %}null{% endif %}"
+  data-file-name="{{ file_name }}"
+  data-delimiter="{% if file_name.endswith('.tsv') %}\t{% else %},{% endif %}"
+>{{ file_content }}</textarea>
+<div id="table-toolbar" class="table-toolbar hidden"></div>
+<div id="table-editor" class="table-editor hidden"></div>
