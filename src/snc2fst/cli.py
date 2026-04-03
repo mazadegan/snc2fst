@@ -835,13 +835,15 @@ def export_cmd(config_file, fmt, output):
 
 
 @main.command("gui")
+@click.argument("path", required=False, type=click.Path(path_type=Path))
 @click.option("--port", default=0, help="Port to listen on (0 = random free port).")
 @click.option("--no-browser", is_flag=True, help="Don't open a browser window.")
-def gui_cmd(port: int, no_browser: bool):
+def gui_cmd(path: Path | None, port: int, no_browser: bool):
     """Launch the snc2fst web GUI."""
     import socket
     import threading
     import webbrowser
+    from urllib.parse import quote
     import uvicorn
     from snc2fst.web.app import app
 
@@ -851,6 +853,11 @@ def gui_cmd(port: int, no_browser: bool):
             port = s.getsockname()[1]
 
     url = f"http://127.0.0.1:{port}"
+    if path is not None:
+        resolved = path.expanduser().resolve()
+        if resolved.is_dir():
+            resolved = resolved / "config.toml"
+        url = f"{url}/project?path={quote(str(resolved))}"
     click.echo(f"Starting snc2fst GUI at {url}")
 
     if not no_browser:

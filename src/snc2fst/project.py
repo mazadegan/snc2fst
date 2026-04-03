@@ -2,6 +2,8 @@
 
 import importlib.resources
 import json
+import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -10,7 +12,22 @@ from pathlib import Path
 # Recent projects
 # ---------------------------------------------------------------------------
 
-_RECENT_PATH = Path.home() / ".config" / "snc2fst" / "recent.json"
+def _app_config_dir() -> Path:
+    """Return a per-user config directory for snc2fst."""
+    if sys.platform == "win32":
+        base = os.environ.get("APPDATA")
+        if base:
+            return Path(base) / "snc2fst"
+        return Path.home() / "AppData" / "Roaming" / "snc2fst"
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "snc2fst"
+    base = os.environ.get("XDG_CONFIG_HOME")
+    if base:
+        return Path(base) / "snc2fst"
+    return Path.home() / ".config" / "snc2fst"
+
+
+_RECENT_PATH = _app_config_dir() / "recent.json"
 _MAX_RECENT = 5
 
 
