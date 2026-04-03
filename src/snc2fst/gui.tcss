@@ -28,6 +28,11 @@ WelcomeScreen {
     padding: 0;
 }
 
+#btn-run-eval {
+    width: 100%;
+    margin-top: 1;
+}
+
 #project-main {
     height: 1fr;
     width: 1fr;
@@ -53,6 +58,28 @@ WelcomeScreen {
 #log-modal-body {
     height: 1fr;
     padding: 1 2;
+}
+
+#eval-modal-body {
+    height: 1fr;
+    padding: 1 2;
+}
+
+#eval-summary {
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+.eval-pass {
+    margin-bottom: 0;
+}
+
+.eval-fail {
+    margin-bottom: 0;
+}
+
+.eval-error {
+    margin-bottom: 0;
 }
 
 .log-error {

@@ -377,6 +377,121 @@ class ProjectCommands(Provider):
                 help="Open the validation log",
             )
 
+        hit = matcher.match("Run eval")
+        if hit > 0:
+            yield Hit(
+                hit,
+                matcher.highlight("Run eval"),
+                screen.action_run_eval,
+                help="Run the test suite",
+            )
+
+
+# ---------------------------------------------------------------------------
+# Eval
+# ---------------------------------------------------------------------------
+
+from dataclasses import dataclass, field as _dc_field
+
+@dataclass
+class _EvalRow:
+    index: int
+    input: str
+    output: str
+    expected: str
+    status: str  # "pass", "fail", "error"
+    message: str = ""
+
+
+def _run_eval(config_path: Path) -> tuple[list[_EvalRow], int, int, int]:
+    """Run the test suite and return (rows, passed, failed, errors)."""
+    from snc2fst.cli import _run_validate
+    from snc2fst.alphabet import tokenize, word_to_str
+    from snc2fst.evaluator import apply_rule, EvalError
+    from snc2fst import dsl
+
+    v = _run_validate(config_path)
+    if not v.ok:
+        return [], 0, 0, 0
+
+    config = v.config
+    alphabet = v.alphabet
+    tests = v.tests
+
+    try:
+        out_asts = {rule.Id: dsl.parse(rule.Out) for rule in config.rules}
+    except dsl.ParseError as e:
+        return [], 0, 0, 0
+
+    rows: list[_EvalRow] = []
+    passed = failed = errors = 0
+
+    for i, (inp_str, exp_str) in enumerate(tests, 1):
+        try:
+            inp_tokens = tokenize(inp_str, alphabet)
+            exp_tokens = tokenize(exp_str, alphabet)
+        except Exception as e:
+            rows.append(_EvalRow(i, inp_str, "", exp_str, "error", str(e)))
+            errors += 1
+            continue
+        try:
+            w = [dict(alphabet[t]) for t in inp_tokens]
+            for rule in config.rules:
+                w = apply_rule(rule, out_asts[rule.Id], w, alphabet)
+            out_str = word_to_str(w, alphabet)
+        except EvalError as e:
+            rows.append(_EvalRow(i, inp_str, "", exp_str, "error", str(e)))
+            errors += 1
+            continue
+
+        ok = tokenize(out_str, alphabet) == exp_tokens
+        status = "pass" if ok else "fail"
+        passed += ok
+        failed += not ok
+        rows.append(_EvalRow(i, inp_str, out_str, exp_str, status))
+
+    return rows, passed, failed, errors
+
+
+class EvalResultsModal(Screen):
+    """Full-screen modal showing eval results."""
+
+    BINDINGS = [("escape", "dismiss_modal", "Close"), ("q", "dismiss_modal", "Close")]
+
+    def __init__(self, rows: list[_EvalRow], passed: int, failed: int, errors: int) -> None:
+        super().__init__()
+        self._rows = rows
+        self._passed = passed
+        self._failed = failed
+        self._errors = errors
+
+    def compose(self) -> ComposeResult:
+        total = self._passed + self._failed + self._errors
+        yield Header()
+        with ScrollableContainer(id="eval-modal-body"):
+            yield Static(
+                f"[bold]{self._passed}/{total} passed[/bold]"
+                + (f"  [red]{self._failed} failed[/red]" if self._failed else "")
+                + (f"  [yellow]{self._errors} errors[/yellow]" if self._errors else ""),
+                markup=True,
+                id="eval-summary",
+            )
+            for row in self._rows:
+                if row.status == "pass":
+                    icon = "[green]✓[/green]"
+                    detail = f"{row.input} → {row.output}"
+                elif row.status == "fail":
+                    icon = "[red]✗[/red]"
+                    detail = f"{row.input} → {row.output}  [dim](expected {row.expected})[/dim]"
+                else:
+                    icon = "[yellow]⚠[/yellow]"
+                    detail = f"{row.input}  [dim]{row.message}[/dim]"
+                yield Static(f"{icon} {detail}", markup=True, classes=f"eval-{row.status}")
+        yield Footer()
+
+    def action_dismiss_modal(self) -> None:
+        self.app.pop_screen()
+
 
 # ---------------------------------------------------------------------------
 # Validation log modal
@@ -445,6 +560,7 @@ class ProjectScreen(Screen):
             with Vertical(id="project-sidebar"):
                 yield Label(self._dir.name, id="sidebar-title")
                 yield DirectoryTree(str(self._dir), id="project-tree")
+                yield Button("▶ Run eval", id="btn-run-eval", variant="primary")
         yield Static("", id="project-status", markup=True)
         yield Footer()
 
@@ -493,8 +609,29 @@ class ProjectScreen(Screen):
         if getattr(event.widget, "id", None) == "project-status":
             self.action_show_log()
 
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "btn-run-eval":
+            self.action_run_eval()
+
     def action_show_log(self) -> None:
         self.app.push_screen(ValidationLogModal(self._val_errors, self._val_warnings))
+
+    def action_run_eval(self) -> None:
+        self.run_worker(self._do_eval(), exclusive=True)
+
+    async def _do_eval(self) -> None:
+        import asyncio
+        btn = self.query_one("#btn-run-eval", Button)
+        btn.label = "Running…"
+        btn.disabled = True
+        try:
+            rows, passed, failed, errors = await asyncio.to_thread(
+                _run_eval, self._config_path
+            )
+            self.app.push_screen(EvalResultsModal(rows, passed, failed, errors))
+        finally:
+            btn.label = "▶ Run eval"
+            btn.disabled = False
 
     def action_close(self) -> None:
         self.app.pop_screen()
