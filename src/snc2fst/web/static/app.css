@@ -617,125 +617,88 @@ div.CodeMirror span.CodeMirror-nonmatchingbracket { color: var(--error); }
   flex: 1;
   min-height: 0;
   background: var(--bg);
-  overflow: hidden;
+  overflow: auto;
 }
 
-.table-editor .tabulator {
+.table-editor .jss_container,
+.table-editor .jss_worksheet {
+  width: max-content !important;
   height: 100%;
-  border: none;
   background: var(--bg) !important;
   color: var(--text) !important;
-  font-family: var(--font-editor);
-  font-size: var(--editor-font-size);
+  box-shadow: none !important;
+  border: none !important;
+  outline: none !important;
 }
 
-.table-editor .tabulator-tableholder,
-.table-editor .tabulator-table,
-.table-editor .tabulator-row-odd,
-.table-editor .tabulator-row-even {
+.table-editor .jss_worksheet table {
+  width: max-content !important;
   background: var(--bg) !important;
   color: var(--text) !important;
+  box-shadow: none !important;
+  border: none !important;
+  outline: none !important;
 }
 
-.table-editor .tabulator-header {
-  border-bottom: 1px solid var(--border);
-  background: var(--surface) !important;
-  color: var(--text-dim) !important;
-  font-family: var(--font-mono);
+.table-editor .jss_container *,
+.table-editor .jss_worksheet * {
+  box-shadow: none !important;
 }
 
-.table-editor .tabulator-header .tabulator-col,
-.table-editor .tabulator-header .tabulator-col-row-handle {
-  background: var(--surface) !important;
-  border-right: 1px solid color-mix(in srgb, var(--border) 60%, transparent) !important;
-  color: var(--text-dim) !important;
-}
-
-.table-editor .tabulator-header .tabulator-col:hover {
-  background: var(--surface2) !important;
-}
-
-.table-editor .tabulator-col,
-.table-editor .tabulator-row {
-  background: transparent !important;
-  color: var(--text) !important;
+.table-editor .jss_worksheet {
   font-family: var(--font-editor) !important;
   font-size: var(--editor-font-size) !important;
 }
 
-.table-editor .tabulator-row {
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent) !important;
+.table-editor table {
+  border-collapse: collapse;
 }
 
-.table-editor .tabulator-cell {
-  border-right: 1px solid color-mix(in srgb, var(--border) 40%, transparent) !important;
-  padding: 0.35rem 0.45rem;
-  background: transparent !important;
+.table-editor td,
+.table-editor th {
+  background: var(--bg) !important;
   color: var(--text) !important;
+  border: 1px solid color-mix(in srgb, var(--border) 45%, transparent) !important;
   font-family: var(--font-editor) !important;
   font-size: var(--editor-font-size) !important;
   text-align: left !important;
 }
 
-.table-editor .tabulator-row:hover {
-  background: color-mix(in srgb, var(--surface2) 55%, transparent) !important;
+.table-editor thead td,
+.table-editor thead th,
+.table-editor .jss_selectall,
+.table-editor .jss_row,
+.table-editor .jss_col {
+  background: var(--surface) !important;
+  color: var(--text-dim) !important;
+  font-family: var(--font-mono) !important;
 }
 
-.table-editor .tabulator-row.is-selected-row,
-.table-editor .tabulator-row.is-selected-row .tabulator-cell,
-.table-editor .tabulator-col.is-selected-col,
-.table-editor .tabulator-cell.is-selected-col {
+.table-editor td.highlight,
+.table-editor td.selected,
+.table-editor .highlight,
+.table-editor .selection {
   background: color-mix(in srgb, var(--primary) 14%, var(--surface)) !important;
 }
 
-.table-editor .tabulator-selected,
-.table-editor .tabulator-row.tabulator-selected {
-  background: color-mix(in srgb, var(--primary) 12%, var(--surface)) !important;
-}
-
-.table-editor .tabulator-cell.tabulator-editing {
-  border-color: color-mix(in srgb, var(--primary) 45%, var(--border)) !important;
-  background: var(--surface) !important;
-}
-
-.table-editor .tabulator-cell input {
-  width: 100%;
-  border: none;
-  outline: none;
+.table-editor input,
+.table-editor textarea {
   background: var(--surface) !important;
   color: var(--text) !important;
-  font: inherit;
-  font-family: var(--font-editor);
+  font-family: var(--font-editor) !important;
   font-size: var(--editor-font-size) !important;
+  border: none !important;
+  outline: none !important;
 }
 
-.table-editor .tabulator-row-header,
-.table-editor .tabulator-row-handle {
-  background: var(--surface) !important;
-  border-right: 1px solid color-mix(in srgb, var(--border) 60%, transparent) !important;
+.table-editor .jss_container ::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
 }
 
-.table-editor .tabulator-footer {
-  background: var(--surface);
-  color: var(--text-dim);
-  border-top: 1px solid var(--border);
-}
-
-.table-editor .tabulator-paginator {
-  color: inherit;
-  font-family: var(--font-ui);
-}
-
-.table-editor .tabulator-page {
-  background: transparent;
-  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
-  color: var(--text-dim);
-}
-
-.table-editor .tabulator-page.active,
-.table-editor .tabulator-page:hover {
-  background: color-mix(in srgb, var(--primary) 12%, var(--surface));
-  color: var(--primary);
+.table-editor .jss_container ::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--border) 85%, transparent);
+  border-radius: 999px;
 }
 
 /* ── Results panel ────────────────────────────────────────── */
