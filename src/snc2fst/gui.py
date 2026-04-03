@@ -5,6 +5,7 @@ from pathlib import Path
 from textual.app import App, ComposeResult
 from textual.message import Message
 from textual.screen import Screen
+from textual.suggester import Suggester
 from textual.widgets import (
     Button,
     Footer,
@@ -161,6 +162,41 @@ class LangInput(Input):
 
 
 # ---------------------------------------------------------------------------
+# Path suggester
+# ---------------------------------------------------------------------------
+
+class PathSuggester(Suggester):
+    """Suggests filesystem directories as the user types a path."""
+
+    async def get_suggestion(self, value: str) -> str | None:
+        if not value:
+            return None
+        path = Path(value).expanduser()
+        # If value ends with '/', complete inside that directory.
+        if value.endswith("/"):
+            parent, prefix = path, ""
+        else:
+            parent, prefix = path.parent, path.name
+        try:
+            matches = sorted(
+                p for p in parent.iterdir()
+                if p.is_dir() and p.name.startswith(prefix) and not p.name.startswith(".")
+            )
+        except (PermissionError, OSError):
+            return None
+        if not matches:
+            return None
+        suggestion = str(matches[0])
+        # Preserve the ~ prefix if the user typed it.
+        if value.startswith("~"):
+            try:
+                suggestion = "~/" + matches[0].relative_to(Path.home()).as_posix()
+            except ValueError:
+                pass
+        return suggestion
+
+
+# ---------------------------------------------------------------------------
 # New Project screen
 # ---------------------------------------------------------------------------
 
@@ -189,7 +225,13 @@ class NewProjectScreen(Screen):
             yield Label("Starter")
             yield Select(starter_options, value="", id="np-starter")
             yield Label("Directory")
-            yield Input(placeholder="/path/to/project", id="np-dir")
+            with Horizontal(id="np-dir-row"):
+                yield Input(
+                    placeholder="~/projects/my-grammar",
+                    suggester=PathSuggester(use_cache=False),
+                    id="np-dir",
+                )
+                yield Button("Browse…", id="btn-browse")
             yield Label("Sources (optional)", id="np-sources-label")
             yield Vertical(id="np-sources-list")
             with Horizontal(id="np-sources-controls"):
@@ -205,6 +247,8 @@ class NewProjectScreen(Screen):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "btn-cancel":
             self.app.pop_screen()
+        elif event.button.id == "btn-browse":
+            self.run_worker(self._browse_directory(), exclusive=True)
         elif event.button.id == "btn-add-source":
             self._add_source_row()
         elif event.button.id == "btn-create":
@@ -212,6 +256,26 @@ class NewProjectScreen(Screen):
         elif event.button.id and event.button.id.startswith("btn-remove-source-"):
             idx = int(event.button.id.split("-")[-1])
             self._remove_source_row(idx)
+
+    async def _browse_directory(self) -> None:
+        import asyncio
+        import sys
+        try:
+            if sys.platform == "darwin":
+                proc = await asyncio.create_subprocess_exec(
+                    "osascript", "-e", "POSIX path of (choose folder)",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                stdout, _ = await proc.communicate()
+                if proc.returncode == 0:
+                    path = stdout.decode().strip()
+                    self.query_one("#np-dir", Input).value = path
+            else:
+                # Fallback: notify user to type the path manually.
+                self.app.notify("Native folder picker is only available on macOS.", severity="warning")
+        except Exception as e:
+            self.app.notify(f"Could not open folder picker: {e}", severity="error")
 
     def _add_source_row(self) -> None:
         container = self.query_one("#np-sources-list", Vertical)
