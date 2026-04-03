@@ -11,6 +11,13 @@ from pydantic import ValidationError
 from snc2fst.models import GrammarConfig
 from snc2fst.alphabet import TokenizeError, check_alphabet, load_alphabet, tokenize, word_to_str
 from snc2fst.io import load_tests
+from snc2fst.nc import (
+    bundle_str as _bundle_str,
+    matching_segments as _matching_segments,
+    parse_bundle as _parse_bundle_text,
+    inspect_segments as _inspect_segments,
+    split_segments as _split_segments_text,
+)
 from snc2fst import dsl
 from snc2fst.evaluator import EvalError, apply_rule
 from snc2fst.table import build_table, format_latex, format_txt
@@ -114,6 +121,95 @@ def _run_meta_wizard(config_path: Path) -> None:
 def main():
     """SNC: Compile Search-and-Change grammars to OpenFST transducers."""
     pass
+
+
+@main.group("tool")
+def tool_group():
+    """Utility commands for working with projects and alphabets."""
+    pass
+
+
+@tool_group.command("nc")
+@click.option(
+    "--config",
+    "config_file",
+    default="config.toml",
+    show_default=True,
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help="Project config.toml to read the alphabet from.",
+)
+@click.option(
+    "--segments",
+    type=str,
+    default=None,
+    help="Comma- or space-separated segment names, e.g. 'a,e,o' or 'a e o'.",
+)
+@click.option(
+    "--bundle",
+    type=str,
+    default=None,
+    help="Feature bundle, e.g. '+syll -high'.",
+)
+def tool_nc_cmd(config_file: Path, segments: str | None, bundle: str | None):
+    """Build or inspect natural classes from the project alphabet."""
+    if bool(segments) == bool(bundle):
+        raise click.ClickException("Provide exactly one of --segments or --bundle.")
+
+    try:
+        config = _load_config(config_file)
+    except ValidationError as e:
+        raise click.ClickException(
+            f"Failed to read config '{config_file}': {e}"
+        ) from e
+    except Exception as e:
+        raise click.ClickException(
+            f"Failed to read config '{config_file}': {e}"
+        ) from e
+
+    try:
+        alphabet = load_alphabet(config_file.parent / config.alphabet_path)
+    except Exception as e:
+        raise click.ClickException(
+            f"Failed to read alphabet '{config.alphabet_path}': {e}"
+        ) from e
+
+    if segments:
+        try:
+            target_segments = _split_segments_text(segments)
+        except ValueError as e:
+            raise click.ClickException(str(e)) from e
+        unknown = [segment for segment in target_segments if segment not in alphabet]
+        if unknown:
+            raise click.ClickException(
+                "Unknown segment(s): " + ", ".join(repr(segment) for segment in unknown)
+            )
+
+        result = _inspect_segments(alphabet, target_segments)
+        click.echo("Segments: " + ", ".join(target_segments))
+        click.echo("Shared bundle: " + _bundle_str(result["bundle"]))
+        click.echo("Natural class: " + (", ".join(result["matches"]) if result["matches"] else "(none)"))
+        if result["extras"]:
+            click.echo(
+                "Warning: this natural class also contains "
+                + ", ".join(result["extras"])
+                + "."
+            )
+        return
+
+    try:
+        parsed_bundle = _parse_bundle_text(bundle or "")
+    except ValueError as e:
+        raise click.ClickException(str(e)) from e
+    valid_features = {feature for segment in alphabet.values() for feature in segment}
+    unknown_features = [feature for _, feature in parsed_bundle if feature not in valid_features]
+    if unknown_features:
+        raise click.ClickException(
+            "Unknown feature(s): " + ", ".join(repr(feature) for feature in sorted(set(unknown_features)))
+        )
+
+    matches = _matching_segments(alphabet, parsed_bundle)
+    click.echo("Bundle: " + _bundle_str(parsed_bundle))
+    click.echo("Matches: " + (", ".join(matches) if matches else "(none)"))
 
 
 @main.command()

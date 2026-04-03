@@ -14,6 +14,17 @@ class TokenizeError(Exception):
     pass
 
 
+def load_segment_order(path: Path) -> list[str]:
+    """Return segment names from the alphabet header row, in file order."""
+    with path.open("r", encoding="utf-8") as f:
+        rows = list(csv.reader(f))
+
+    if not rows:
+        raise ValueError(f"Alphabet file '{path}' is empty.")
+
+    return [segment.strip() for segment in rows[0][1:] if segment.strip()]
+
+
 def load_alphabet(path: Path) -> dict[str, Segment]:
     """Parse an alphabet CSV into {segment_name: {feature: valence}}."""
     with path.open("r", encoding="utf-8") as f:

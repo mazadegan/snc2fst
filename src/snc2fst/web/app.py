@@ -59,6 +59,7 @@ async def project_view(request: Request, path: str):
         return HTMLResponse("Project not found.", status_code=404)
 
     from snc2fst.cli import _run_validate
+    from snc2fst.alphabet import load_segment_order
 
     validation = await asyncio.to_thread(_run_validate, config_path)
     title = config_path.parent.name
@@ -68,6 +69,15 @@ async def project_view(request: Request, path: str):
 
     tree = _build_tree(config_path.parent, config_path)
     file_content = config_path.read_text()
+    alphabet_segments: list[str] = []
+    if validation.config is not None:
+        try:
+            alphabet_segments = await asyncio.to_thread(
+                load_segment_order,
+                config_path.parent / validation.config.alphabet_path,
+            )
+        except Exception:
+            alphabet_segments = list(validation.alphabet) if validation.alphabet else []
 
     return _r(request, "project.html", {
         "config_path": str(config_path),
@@ -80,6 +90,7 @@ async def project_view(request: Request, path: str):
         "ok": validation.ok,
         "errors": validation.errors,
         "warnings": validation.warnings,
+        "alphabet_segments": alphabet_segments,
     })
 
 
@@ -192,6 +203,95 @@ async def compile_route(
         "rows": rows,
         "out_path": str(out_path) if out_path else None,
         "error": error,
+    })
+
+
+# ---------------------------------------------------------------------------
+# Natural class tool
+# ---------------------------------------------------------------------------
+
+@app.post("/api/tool/nc", response_class=HTMLResponse)
+async def nc_tool(
+    request: Request,
+    config_path: str = Form(...),
+    mode: str = Form(""),
+    segments: str = Form(""),
+    bundle: str = Form(""),
+):
+    from snc2fst.cli import _load_config
+    from snc2fst.alphabet import load_alphabet
+    from snc2fst.nc import (
+        inspect_segments,
+        split_segments,
+        bundle_str,
+        parse_bundle,
+        matching_segments,
+    )
+
+    try:
+        config = await asyncio.to_thread(_load_config, Path(config_path))
+        alphabet = await asyncio.to_thread(load_alphabet, Path(config_path).parent / config.alphabet_path)
+    except Exception as e:
+        return _r(request, "partials/nc_result.html", {
+            "error": str(e),
+        })
+
+    if not bundle.strip() and not segments.strip():
+        return _r(request, "partials/nc_result.html", {
+            "mode": "bundle",
+            "bundle": "{}",
+            "matches": list(alphabet),
+        })
+
+    if mode not in {"segments", "bundle"}:
+        if segments.strip() and not bundle.strip():
+            mode = "segments"
+        elif bundle.strip() or (not segments.strip() and not bundle.strip()):
+            mode = "bundle"
+        else:
+            return _r(request, "partials/nc_result.html", {
+                "error": "Provide either segments or a bundle.",
+            })
+
+    if mode == "segments":
+        try:
+            target_segments = split_segments(segments)
+        except Exception as e:
+            return _r(request, "partials/nc_result.html", {"error": str(e)})
+
+        unknown = [segment for segment in target_segments if segment not in alphabet]
+        if unknown:
+            return _r(request, "partials/nc_result.html", {
+                "error": "Unknown segment(s): " + ", ".join(unknown),
+            })
+
+        result = inspect_segments(alphabet, target_segments)
+        return _r(request, "partials/nc_result.html", {
+            "mode": "segments",
+            "segments": result["segments"],
+            "bundle": bundle_str(result["bundle"]),
+            "matches": result["matches"],
+            "extras": result["extras"],
+            "is_exact": result["is_exact"],
+        })
+
+    try:
+        parsed_bundle = parse_bundle(bundle)
+    except Exception as e:
+        return _r(request, "partials/nc_result.html", {"error": str(e)})
+
+    valid_features = {feature for segment_data in alphabet.values() for feature in segment_data}
+    unknown_features = [feature for _, feature in parsed_bundle if feature not in valid_features]
+    if unknown_features:
+        return _r(request, "partials/nc_result.html", {
+            "error": "Unknown feature(s): " + ", ".join(sorted(set(unknown_features))),
+        })
+
+    matches = matching_segments(alphabet, parsed_bundle)
+    return _r(request, "partials/nc_result.html", {
+        "mode": "bundle",
+        "bundle": bundle_str(parsed_bundle),
+        "matches": matches,
     })
 
 

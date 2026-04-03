@@ -47,10 +47,59 @@
         </div>
         <div class="utility-content">
           <section class="utility-panel is-active" data-utility-panel="nc" role="tabpanel">
-            <div class="utility-panel-header">Natural Class Explorer</div>
-            <p class="utility-placeholder">
-              This pane will host feature bundle and natural class tools.
-            </p>
+            <div class="utility-panel-header">Natural Class Builder</div>
+            <form
+              class="nc-form"
+              hx-post="/api/tool/nc"
+              hx-target="#nc-results"
+              hx-swap="innerHTML">
+              <input type="hidden" name="config_path" value="{{ config_path }}">
+              <input type="hidden" name="mode" value="segments">
+              <input type="hidden" name="bundle" value="">
+              <label class="nc-label" for="nc-segments">Segments</label>
+              <input
+                id="nc-segments"
+                class="nc-input"
+                type="text"
+                name="segments"
+                placeholder="a e o"
+                autocomplete="off">
+              <div class="nc-chip-list" aria-label="Alphabet segments">
+                {% for segment in alphabet_segments %}
+                <button
+                  type="button"
+                  class="nc-chip"
+                  onclick="window.appendNcSegment && window.appendNcSegment('{{ segment|e }}')">
+                  {{ segment }}
+                </button>
+                {% endfor %}
+              </div>
+              <button type="submit" class="action-btn nc-submit">Build Class</button>
+            </form>
+            <div class="nc-divider"></div>
+            <form
+              class="nc-form"
+              hx-post="/api/tool/nc"
+              hx-target="#nc-results"
+              hx-swap="innerHTML">
+              <input type="hidden" name="config_path" value="{{ config_path }}">
+              <input type="hidden" name="mode" value="bundle">
+              <input type="hidden" name="segments" value="">
+              <label class="nc-label" for="nc-bundle">Bundle</label>
+              <input
+                id="nc-bundle"
+                class="nc-input"
+                type="text"
+                name="bundle"
+                placeholder="+syll -high"
+                autocomplete="off">
+              <button type="submit" class="action-btn nc-submit">Resolve Bundle</button>
+            </form>
+            <div id="nc-results" class="nc-results">
+              <p class="utility-placeholder">
+                Enter segments to see their shared bundle, or enter a bundle to see which segments it matches.
+              </p>
+            </div>
           </section>
           <section class="utility-panel" data-utility-panel="search" role="tabpanel" hidden>
             <div class="utility-panel-header">Project Search</div>
@@ -239,6 +288,14 @@
     }
   };
 
+  window.appendNcSegment = function (segment) {
+    const input = document.getElementById('nc-segments');
+    if (!input) return;
+    const current = input.value.trim();
+    input.value = current ? current + " " + segment : segment;
+    input.focus();
+  };
+
   function parseDelimited(text, delimiter) {
     const rows = [];
     let row = [];
@@ -375,11 +432,11 @@
         tableHeight: '100%',
         columnDrag: false,
         columnSorting: false,
-        allowInsertColumn: false,
-        allowManualInsertColumn: false,
-        allowManualInsertRow: false,
-        allowDeleteColumn: false,
-        allowDeleteRow: false,
+        allowInsertColumn: true,
+        allowManualInsertColumn: true,
+        allowManualInsertRow: true,
+        allowDeleteColumn: true,
+        allowDeleteRow: true,
         allowRenameColumn: false,
         rowDrag: state.tableKind === 'tests',
         onselection: function (_instance, x1, y1, x2, y2) {
