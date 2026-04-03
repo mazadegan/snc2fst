@@ -347,7 +347,29 @@ class NewProjectScreen(Screen):
             return
 
         add_recent(title, config_path)
-        self.app.notify(f"Project '{title}' created.")
+        self.app.pop_screen()
+        self.app.push_screen(ProjectScreen(config_path))
+
+
+# ---------------------------------------------------------------------------
+# Project screen (stub — main editor to be built here)
+# ---------------------------------------------------------------------------
+
+class ProjectScreen(Screen):
+    """Main project editing screen."""
+
+    BINDINGS = [("ctrl+w", "close", "Close project")]
+
+    def __init__(self, config_path: Path) -> None:
+        super().__init__()
+        self._config_path = config_path
+
+    def compose(self) -> ComposeResult:
+        yield Header()
+        yield Static(f"Project: {self._config_path}", id="project-stub")
+        yield Footer()
+
+    def action_close(self) -> None:
         self.app.pop_screen()
 
 
@@ -387,16 +409,54 @@ class WelcomeScreen(Screen):
                 )
         yield Footer()
 
+    def on_mount(self) -> None:
+        entries = _load_recent()
+        broken = [e for e in entries if not Path(e["path"]).exists()]
+        if not broken:
+            return
+        _save_recent([e for e in entries if Path(e["path"]).exists()])
+        for e in broken:
+            self.app.notify(
+                f"Removed '{e['title']}' from recent — file not found: {e['path']}",
+                severity="warning",
+            )
+        # Remove the stale items from the rendered list.
+        try:
+            lv = self.query_one("#recent-list", ListView)
+            broken_paths = {e["path"] for e in broken}
+            for item in list(lv.query(ListItem)):
+                idx = int(item.id.split("-")[-1])
+                if entries[idx]["path"] in broken_paths:
+                    item.remove()
+        except Exception:
+            pass
+
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "btn-new":
             self.app.push_screen(NewProjectScreen())
         elif event.button.id == "btn-open":
-            self.app.notify("Open Project — coming soon.")
+            self.run_worker(self._pick_and_open(), exclusive=True)
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         index = int(event.item.id.split("-")[-1])
         entry = _load_recent()[index]
-        self.app.notify(f"Opening {entry['title']} — coming soon.")
+        self.app.open_project(Path(entry["path"]))
+
+    async def _pick_and_open(self) -> None:
+        import asyncio
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "osascript", "-e",
+                'POSIX path of (choose file with prompt "Open snc2fst project")',
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, _ = await proc.communicate()
+            if proc.returncode == 0:
+                path = Path(stdout.decode().strip())
+                self.app.open_project(path)
+        except Exception as e:
+            self.app.notify(f"Could not open file picker: {e}", severity="error")
 
 
 # ---------------------------------------------------------------------------
@@ -413,7 +473,30 @@ class SncApp(App):
     ]
 
     def on_mount(self) -> None:
+        self.theme = "tokyo-night"
         self.push_screen(WelcomeScreen())
+
+    def open_project(self, config_path: Path) -> None:
+        """Validate and open a project, updating the recent list."""
+        import tomllib
+        from snc2fst.models import GrammarConfig
+        from pydantic import ValidationError
+        if config_path.suffix != ".toml":
+            self.notify("Please select a .toml project file.", severity="error")
+            return
+        try:
+            with open(config_path, "rb") as f:
+                raw = tomllib.load(f)
+            config = GrammarConfig(**raw)
+        except FileNotFoundError:
+            self.notify(f"File not found: {config_path}", severity="error")
+            return
+        except (tomllib.TOMLDecodeError, ValidationError) as e:
+            self.notify(f"Invalid project file: {e}", severity="error")
+            return
+        title = getattr(getattr(config, "meta", None), "title", None) or config_path.stem
+        add_recent(title, config_path)
+        self.push_screen(ProjectScreen(config_path))
 
 
 def run() -> None:
