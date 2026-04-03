@@ -47,6 +47,18 @@ snc init --from iloko_plural             # by name
 
 Available starters: `english_past_tense`, `english_plural`, `georgian_laterals`, `iloko_plural`, `turkish_k_deletion`, `votic_vowel_harmony`.
 
+## GUI
+
+You can open a project in the web GUI with:
+
+```bash
+snc gui .
+```
+
+from inside a project directory, or pass a project path directly.
+
+The GUI provides a project workspace for authoring rules, editing `alphabet.csv` and `tests.csv`/`tests.tsv`, exploring natural classes, and running `eval` and `compile` without leaving the editor.
+
 ## Commands
 
 ### `snc validate`
