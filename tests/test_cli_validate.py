@@ -69,7 +69,7 @@ def test_validate_missing_tests_file(tmp_path):
     )
     for item in src.iterdir():
         (tmp_path / item.name).write_bytes(item.read_bytes())
-    (tmp_path / "tests.tsv").unlink()
+    (tmp_path / "tests.csv").unlink()
     runner = CliRunner()
     result = runner.invoke(main, ["validate", str(tmp_path / "config.toml")])
     assert result.exit_code != 0

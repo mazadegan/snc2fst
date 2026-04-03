@@ -10,14 +10,16 @@ from textual.widgets import (
     Button,
     Footer,
     Header,
+    DirectoryTree,
     Input,
     Label,
     ListItem,
     ListView,
     Select,
     Static,
+    TextArea,
 )
-from textual.containers import Center, Horizontal, ScrollableContainer, Vertical
+from textual.containers import Center, Horizontal, ScrollableContainer, Vertical, VerticalScroll
 
 
 # ---------------------------------------------------------------------------
@@ -108,7 +110,7 @@ def _create_project(
         source_dir = starters_dir.joinpath(starter)
         import tomllib
         raw_config = tomllib.loads(source_dir.joinpath("config.toml").read_text())
-        tests_filename = raw_config.get("tests_path", "tests.tsv")
+        tests_filename = raw_config.get("tests_path", "tests.csv")
         alphabet_filename = raw_config.get("alphabet_path", "alphabet.csv")
         source_files = [
             (config_path, source_dir.joinpath("config.toml")),
@@ -119,7 +121,7 @@ def _create_project(
         source_files = [
             (config_path, templates_dir.joinpath("default_config.toml")),
             (directory / "alphabet.csv", templates_dir.joinpath("default_alphabet.csv")),
-            (directory / "tests.tsv", templates_dir.joinpath("default_tests.tsv")),
+            (directory / "tests.csv", templates_dir.joinpath("default_tests.csv")),
         ]
 
     directory.mkdir(parents=True, exist_ok=True)
@@ -358,16 +360,79 @@ class NewProjectScreen(Screen):
 class ProjectScreen(Screen):
     """Main project editing screen."""
 
-    BINDINGS = [("ctrl+w", "close", "Close project")]
+    BINDINGS = [
+        ("ctrl+w", "close", "Close project"),
+        ("ctrl+s", "save", "Save"),
+    ]
 
     def __init__(self, config_path: Path) -> None:
         super().__init__()
-        self._config_path = config_path
+        self._config_path = config_path.resolve()
+        self._dir = self._config_path.parent
+        import tomllib
+        raw = tomllib.loads(self._config_path.read_text())
+        self._alphabet_path = self._dir / raw.get("alphabet_path", "alphabet.csv")
+        self._tests_path = self._dir / raw.get("tests_path", "tests.csv")
+        self._active_path = self._config_path
 
     def compose(self) -> ComposeResult:
         yield Header()
-        yield Static(f"Project: {self._config_path}", id="project-stub")
+        with Horizontal(id="project-body"):
+            with Vertical(id="project-sidebar"):
+                yield Label(self._dir.name, id="sidebar-title")
+                yield DirectoryTree(str(self._dir), id="project-tree")
+            with Vertical(id="project-main"):
+                yield TextArea(
+                    self._config_path.read_text(),
+                    id="project-editor",
+                    language="toml",
+                    theme="vscode_dark",
+                    tab_behavior="indent",
+                )
+        yield Static("", id="project-log")
         yield Footer()
+
+    def on_mount(self) -> None:
+        self._validate()
+
+    def on_directory_tree_file_selected(
+        self, event: DirectoryTree.FileSelected
+    ) -> None:
+        path = Path(event.path)
+        try:
+            text = path.read_text()
+        except Exception as e:
+            self.app.notify(f"Could not read file: {e}", severity="error")
+            return
+        self._active_path = path
+        lang = "toml" if path.suffix == ".toml" else None
+        editor = self.query_one("#project-editor", TextArea)
+        editor.load_text(text)
+        editor.language = lang
+        editor.theme = "vscode_dark"
+
+    def action_save(self) -> None:
+        text = self.query_one("#project-editor", TextArea).text
+        self._active_path.write_text(text)
+        self.app.notify(f"Saved {self._active_path.name}")
+        self._validate()
+
+    def _validate(self) -> None:
+        import io, contextlib
+        from snc2fst.cli import _run_validate
+        stderr_buf = io.StringIO()
+        with contextlib.redirect_stderr(stderr_buf):
+            result = _run_validate(self._config_path)
+        log = self.query_one("#project-log", Static)
+        errors = stderr_buf.getvalue().strip()
+        if result.ok and not result.warnings:
+            log.update("✓ No errors")
+        else:
+            lines = []
+            if errors:
+                lines.append(errors)
+            lines.extend(result.warnings)
+            log.update("\n".join(lines))
 
     def action_close(self) -> None:
         self.app.pop_screen()
@@ -473,7 +538,7 @@ class SncApp(App):
     ]
 
     def on_mount(self) -> None:
-        self.theme = "tokyo-night"
+        self.theme = "rose-pine-moon"
         self.push_screen(WelcomeScreen())
 
     def open_project(self, config_path: Path) -> None:

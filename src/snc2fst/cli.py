@@ -176,7 +176,7 @@ def init(filename, from_starter, pick_starter):
         source_dir = starters_dir.joinpath(from_starter)
         import tomllib
         raw_config = tomllib.loads(source_dir.joinpath("config.toml").read_text())
-        tests_filename = raw_config.get("tests_path", "tests.tsv")
+        tests_filename = raw_config.get("tests_path", "tests.csv")
         alphabet_filename = raw_config.get("alphabet_path", "alphabet.csv")
         source_files = [
             (config_path, source_dir.joinpath("config.toml")),
@@ -187,7 +187,7 @@ def init(filename, from_starter, pick_starter):
         source_files = [
             (config_path, templates_dir.joinpath("default_config.toml")),
             (dir_path / "alphabet.csv", templates_dir.joinpath("default_alphabet.csv")),
-            (dir_path / "tests.tsv", templates_dir.joinpath("default_tests.tsv")),
+            (dir_path / "tests.csv", templates_dir.joinpath("default_tests.csv")),
         ]
 
     for target_file, _ in source_files:

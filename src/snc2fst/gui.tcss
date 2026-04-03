@@ -2,6 +2,51 @@ WelcomeScreen {
     align: center middle;
 }
 
+/* ── Project screen ─────────────────────────────────── */
+
+#project-body {
+    height: 1fr;
+}
+
+#project-sidebar {
+    width: 22;
+    height: 100%;
+    border-right: solid $primary-darken-2;
+    padding: 1;
+}
+
+#sidebar-title {
+    text-style: bold;
+    width: 100%;
+    margin-bottom: 1;
+}
+
+#project-tree {
+    width: 100%;
+    height: 1fr;
+    border: none;
+    padding: 0;
+}
+
+#project-main {
+    height: 100%;
+    width: 1fr;
+}
+
+#project-editor {
+    height: 1fr;
+    width: 100%;
+}
+
+#project-log {
+    height: 6;
+    width: 100%;
+    border-top: solid $primary-darken-2;
+    padding: 0 1;
+    overflow-y: auto;
+    color: $warning;
+}
+
 NewProjectScreen {
     align: center top;
 }

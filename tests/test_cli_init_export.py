@@ -20,7 +20,7 @@ def test_init_from_starter_creates_files(tmp_path):
     assert result.exit_code == 0
     assert config.exists()
     assert (tmp_path / "alphabet.csv").exists()
-    assert (tmp_path / "tests.tsv").exists()
+    assert (tmp_path / "tests.csv").exists()
 
 
 def test_init_from_starter_prints_file_list(tmp_path):
@@ -29,7 +29,7 @@ def test_init_from_starter_prints_file_list(tmp_path):
     result = runner.invoke(main, ["init", "--filename", str(config), "--from", "english_plural"])
     assert "config.toml" in result.output
     assert "alphabet.csv" in result.output
-    assert "tests.tsv" in result.output
+    assert "tests.csv" in result.output
 
 
 def test_init_from_unknown_starter_errors(tmp_path):

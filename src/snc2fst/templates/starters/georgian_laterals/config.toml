@@ -1,5 +1,5 @@
 alphabet_path = "alphabet.csv"
-tests_path = "tests.tsv"
+tests_path = "tests.csv"
 
 [meta]
 title = "Georgian lateral harmony"
