@@ -9,10 +9,64 @@
       <a href="/" class="sidebar-home" title="Home">&#8592;</a>
       <span class="sidebar-title">{{ title }}</span>
     </div>
-    <div id="file-tree" class="file-tree">
-      {% include "partials/tree.html" %}
+    <div class="sidebar-body">
+      <div id="file-tree" class="file-tree">
+        {% include "partials/tree.html" %}
+      </div>
+      <section class="utility-pane" aria-label="Project utilities">
+        <div class="utility-tabs" role="tablist" aria-label="Sidebar utilities">
+          <button
+            type="button"
+            class="utility-tab is-active"
+            data-utility-tab="nc"
+            role="tab"
+            aria-selected="true"
+            title="Natural class explorer">
+            NC
+          </button>
+          <button
+            type="button"
+            class="utility-tab"
+            data-utility-tab="search"
+            role="tab"
+            aria-selected="false"
+            title="Project search">
+            Search
+          </button>
+          <button
+            type="button"
+            class="utility-tab"
+            data-utility-tab="notes"
+            role="tab"
+            aria-selected="false"
+            title="Workspace notes">
+            Notes
+          </button>
+        </div>
+        <div class="utility-content">
+          <section class="utility-panel is-active" data-utility-panel="nc" role="tabpanel">
+            <div class="utility-panel-header">Natural Class Explorer</div>
+            <p class="utility-placeholder">
+              This pane will host feature bundle and natural class tools.
+            </p>
+          </section>
+          <section class="utility-panel" data-utility-panel="search" role="tabpanel" hidden>
+            <div class="utility-panel-header">Project Search</div>
+            <p class="utility-placeholder">
+              Search and navigation helpers can live here.
+            </p>
+          </section>
+          <section class="utility-panel" data-utility-panel="notes" role="tabpanel" hidden>
+            <div class="utility-panel-header">Notes</div>
+            <p class="utility-placeholder">
+              Keep temporary grammar notes and scratch work in this space.
+            </p>
+          </section>
+        </div>
+      </section>
     </div>
   </aside>
+  <div id="sidebar-resizer" class="sidebar-resizer" role="separator" aria-orientation="vertical" aria-label="Resize sidebar"></div>
 
   <!-- Main -->
   <div class="main-col">
@@ -43,14 +97,20 @@
       hx-target="#results-panel"
       hx-indicator="#spinner"
       hx-on::after-request="document.getElementById('results-panel').classList.remove('hidden')"
-      title="ctrl+e">&#9654; Eval</span>
+      title="ctrl+e">
+      <i data-lucide="play" class="statusbar-icon" aria-hidden="true"></i>
+      Eval
+    </span>
     <span class="statusbar-btn"
       hx-post="/api/compile"
       hx-include="#compile-settings, #hidden-config"
       hx-target="#results-panel"
       hx-indicator="#spinner"
       hx-on::after-request="document.getElementById('results-panel').classList.remove('hidden')"
-      title="ctrl+m">&#9881; Compile</span>
+      title="ctrl+m">
+      <i data-lucide="hammer" class="statusbar-icon" aria-hidden="true"></i>
+      Compile
+    </span>
     <button id="theme-toggle" class="statusbar-btn statusbar-icon-btn" type="button" aria-label="Toggle theme"></button>
     <span id="spinner" class="spinner htmx-indicator">&#9679;&#9679;&#9679;</span>
   </div>
@@ -69,6 +129,81 @@
 
 <script>
 (function () {
+  const root = document.documentElement;
+  const sidebar = document.querySelector('.sidebar');
+  const resizer = document.getElementById('sidebar-resizer');
+  const minSidebarWidth = 180;
+  const maxSidebarWidth = 520;
+
+  function clampSidebarWidth(width) {
+    return Math.max(minSidebarWidth, Math.min(maxSidebarWidth, width));
+  }
+
+  function setSidebarWidth(width) {
+    const clamped = clampSidebarWidth(width);
+    root.style.setProperty('--sidebar-width', clamped + 'px');
+    localStorage.setItem('snc-sidebar-width', String(clamped));
+    if (resizer) {
+      resizer.setAttribute('aria-valuenow', String(clamped));
+    }
+  }
+
+  const savedSidebarWidth = Number(localStorage.getItem('snc-sidebar-width'));
+  if (!Number.isNaN(savedSidebarWidth) && savedSidebarWidth > 0) {
+    setSidebarWidth(savedSidebarWidth);
+  }
+
+  if (resizer && sidebar) {
+    resizer.setAttribute('aria-valuemin', String(minSidebarWidth));
+    resizer.setAttribute('aria-valuemax', String(maxSidebarWidth));
+
+    resizer.addEventListener('mousedown', function (event) {
+      event.preventDefault();
+      document.body.classList.add('is-resizing-sidebar');
+
+      function onMouseMove(moveEvent) {
+        setSidebarWidth(moveEvent.clientX);
+      }
+
+      function onMouseUp() {
+        document.body.classList.remove('is-resizing-sidebar');
+        window.removeEventListener('mousemove', onMouseMove);
+        window.removeEventListener('mouseup', onMouseUp);
+      }
+
+      window.addEventListener('mousemove', onMouseMove);
+      window.addEventListener('mouseup', onMouseUp);
+    });
+  }
+
+  const utilityTabs = Array.from(document.querySelectorAll('[data-utility-tab]'));
+  const utilityPanels = Array.from(document.querySelectorAll('[data-utility-panel]'));
+
+  function setUtilityTab(name) {
+    utilityTabs.forEach(function (tab) {
+      const active = tab.dataset.utilityTab === name;
+      tab.classList.toggle('is-active', active);
+      tab.setAttribute('aria-selected', String(active));
+    });
+    utilityPanels.forEach(function (panel) {
+      const active = panel.dataset.utilityPanel === name;
+      panel.classList.toggle('is-active', active);
+      panel.hidden = !active;
+    });
+    localStorage.setItem('snc-sidebar-utility-tab', name);
+  }
+
+  utilityTabs.forEach(function (tab) {
+    tab.addEventListener('click', function () {
+      setUtilityTab(tab.dataset.utilityTab);
+    });
+  });
+
+  const savedUtilityTab = localStorage.getItem('snc-sidebar-utility-tab');
+  if (savedUtilityTab && utilityTabs.some(function (tab) { return tab.dataset.utilityTab === savedUtilityTab; })) {
+    setUtilityTab(savedUtilityTab);
+  }
+
   function closeProblems() {
     document.querySelectorAll('[data-problems-popover]').forEach(function (popover) {
       popover.classList.add('hidden');
