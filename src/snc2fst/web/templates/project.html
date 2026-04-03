@@ -142,26 +142,85 @@
     {% include "partials/status.html" %}
   </div>
   <div class="statusbar-actions">
-    <span class="statusbar-btn"
-      hx-post="/api/eval"
-      hx-include="#eval-settings, #hidden-config"
-      hx-target="#results-panel"
-      hx-indicator="#spinner"
-      hx-on::after-request="document.getElementById('results-panel').classList.remove('hidden')"
-      title="ctrl+e">
-      <i data-lucide="play" class="statusbar-icon" aria-hidden="true"></i>
-      Eval
-    </span>
-    <span class="statusbar-btn"
-      hx-post="/api/compile"
-      hx-include="#compile-settings, #hidden-config"
-      hx-target="#results-panel"
-      hx-indicator="#spinner"
-      hx-on::after-request="document.getElementById('results-panel').classList.remove('hidden')"
-      title="ctrl+m">
-      <i data-lucide="hammer" class="statusbar-icon" aria-hidden="true"></i>
-      Compile
-    </span>
+    <div class="statusbar-split" data-action-wrap>
+      <button type="button"
+        class="statusbar-btn statusbar-split-main"
+        hx-post="/api/eval"
+        hx-include="#eval-settings, #hidden-config"
+        hx-target="#results-panel"
+        hx-indicator="#spinner"
+        hx-on::after-request="document.getElementById('results-panel').classList.remove('hidden')"
+        title="ctrl+e">
+        <i data-lucide="play" class="statusbar-icon" aria-hidden="true"></i>
+        Eval
+      </button>
+      <button
+        type="button"
+        class="statusbar-btn statusbar-split-caret"
+        data-action-toggle="eval"
+        aria-expanded="false"
+        aria-label="Eval settings"
+        title="Eval settings">
+        <i data-lucide="chevron-up" class="statusbar-icon" aria-hidden="true"></i>
+      </button>
+      <div class="action-popover hidden" data-action-popover="eval">
+        <div class="action-popover-title">Eval Settings</div>
+        <div id="eval-settings" class="action-settings">
+          <label class="action-setting-row">
+            <span>Use compiled FSTs</span>
+            <input type="checkbox" name="use_fst" value="true">
+          </label>
+        </div>
+      </div>
+    </div>
+    <div class="statusbar-split" data-action-wrap>
+      <button type="button"
+        class="statusbar-btn statusbar-split-main"
+        hx-post="/api/compile"
+        hx-include="#compile-settings, #hidden-config"
+        hx-target="#results-panel"
+        hx-indicator="#spinner"
+        hx-on::after-request="document.getElementById('results-panel').classList.remove('hidden')"
+        title="ctrl+m">
+        <i data-lucide="hammer" class="statusbar-icon" aria-hidden="true"></i>
+        Compile
+      </button>
+      <button
+        type="button"
+        class="statusbar-btn statusbar-split-caret"
+        data-action-toggle="compile"
+        aria-expanded="false"
+        aria-label="Compile settings"
+        title="Compile settings">
+        <i data-lucide="chevron-up" class="statusbar-icon" aria-hidden="true"></i>
+      </button>
+      <div class="action-popover hidden" data-action-popover="compile">
+        <div class="action-popover-title">Compile Settings</div>
+        <div id="compile-settings" class="action-settings">
+          <label class="action-setting-row">
+            <span class="action-setting-label">Format</span>
+            <select name="fmt" class="action-setting-input">
+              <option value="fst" selected>fst</option>
+              <option value="att">att</option>
+            </select>
+          </label>
+          <label class="action-setting-row">
+            <span class="action-setting-label">Max arcs</span>
+            <input
+              type="number"
+              name="max_arcs"
+              class="action-setting-input"
+              min="1"
+              step="1"
+              value="1000000">
+          </label>
+          <label class="action-setting-row">
+            <span>Skip optimization</span>
+            <input type="checkbox" name="no_optimize" value="true">
+          </label>
+        </div>
+      </div>
+    </div>
     <button id="theme-toggle" class="statusbar-btn statusbar-icon-btn" type="button" aria-label="Toggle theme"></button>
     <span id="spinner" class="spinner htmx-indicator">&#9679;&#9679;&#9679;</span>
   </div>
@@ -169,14 +228,6 @@
 
 <!-- Hidden inputs for config path and settings -->
 <input type="hidden" id="hidden-config" name="config_path" value="{{ config_path }}">
-<div id="eval-settings" style="display:none">
-  <input type="hidden" name="use_fst" value="false">
-</div>
-<div id="compile-settings" style="display:none">
-  <input type="hidden" name="fmt" value="fst">
-  <input type="hidden" name="max_arcs" value="1000000">
-  <input type="hidden" name="no_optimize" value="false">
-</div>
 
 <script>
 (function () {
@@ -263,6 +314,18 @@
       wrap.classList.remove('is-open');
     });
     document.querySelectorAll('[data-problems-toggle]').forEach(function (toggle) {
+      toggle.setAttribute('aria-expanded', 'false');
+    });
+  }
+
+  function closeActionPopovers() {
+    document.querySelectorAll('[data-action-popover]').forEach(function (popover) {
+      popover.classList.add('hidden');
+    });
+    document.querySelectorAll('[data-action-wrap]').forEach(function (wrap) {
+      wrap.classList.remove('is-open');
+    });
+    document.querySelectorAll('[data-action-toggle]').forEach(function (toggle) {
       toggle.setAttribute('aria-expanded', 'false');
     });
   }
@@ -547,6 +610,22 @@
   initEditor(textarea);
 
   document.addEventListener('click', function (event) {
+    const actionToggle = event.target.closest('[data-action-toggle]');
+    if (actionToggle) {
+      const name = actionToggle.dataset.actionToggle;
+      const wrap = actionToggle.closest('[data-action-wrap]');
+      const popover = document.querySelector('[data-action-popover="' + name + '"]');
+      const willOpen = !!popover && popover.classList.contains('hidden');
+      closeProblems();
+      closeActionPopovers();
+      if (popover && wrap && willOpen) {
+        popover.classList.remove('hidden');
+        wrap.classList.add('is-open');
+        actionToggle.setAttribute('aria-expanded', 'true');
+      }
+      return;
+    }
+
     const toggle = event.target.closest('[data-problems-toggle]');
     if (toggle) {
       const wrap = toggle.closest('.problems-wrap');
@@ -565,11 +644,15 @@
     if (!event.target.closest('.problems-wrap')) {
       closeProblems();
     }
+    if (!event.target.closest('[data-action-wrap]')) {
+      closeActionPopovers();
+    }
   });
 
   document.addEventListener('keydown', function (event) {
     if (event.key === 'Escape') {
       closeProblems();
+      closeActionPopovers();
     }
   });
 

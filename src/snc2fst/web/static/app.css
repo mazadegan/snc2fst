@@ -975,6 +975,12 @@ div.CodeMirror span.CodeMirror-nonmatchingbracket { color: var(--error); }
 
 .statusbar-actions { display: flex; align-items: center; gap: 0.5rem; }
 
+.statusbar-split {
+  position: relative;
+  display: inline-flex;
+  align-items: stretch;
+}
+
 .statusbar-btn {
   display: inline-flex;
   align-items: center;
@@ -991,6 +997,21 @@ div.CodeMirror span.CodeMirror-nonmatchingbracket { color: var(--error); }
 
 .statusbar-btn:hover { background: var(--surface2); color: var(--text); }
 
+.statusbar-split-main {
+  border-radius: 3px 0 0 3px;
+}
+
+.statusbar-split-caret {
+  padding-inline: 5px;
+  border-left: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  border-radius: 0 3px 3px 0;
+}
+
+.statusbar-split.is-open .statusbar-btn {
+  background: var(--surface2);
+  color: var(--text);
+}
+
 .statusbar-icon-btn {
   display: inline-flex;
   align-items: center;
@@ -1001,6 +1022,65 @@ div.CodeMirror span.CodeMirror-nonmatchingbracket { color: var(--error); }
 .statusbar-icon {
   width: 0.9rem;
   height: 0.9rem;
+}
+
+.action-popover {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 6px);
+  min-width: 220px;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.28);
+  z-index: 20;
+}
+
+.action-popover-title {
+  margin-bottom: 0.6rem;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.action-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.action-setting-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 0.8rem;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.action-setting-label {
+  color: var(--text);
+  font-size: 12px;
+}
+
+.action-setting-input {
+  width: 8.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  padding: 0.35rem 0.45rem;
+  font: inherit;
+}
+
+.action-setting-row input[type="checkbox"] {
+  margin: 0;
+  justify-self: end;
+}
+
+.action-setting-input:focus {
+  outline: none;
+  border-color: var(--primary);
 }
 
 .spinner {
