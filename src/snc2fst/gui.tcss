@@ -2,6 +2,62 @@ WelcomeScreen {
     align: center middle;
 }
 
+NewProjectScreen {
+    align: center top;
+}
+
+#new-project-form {
+    width: 70;
+    height: 100%;
+    padding: 1 2;
+}
+
+#new-project-heading {
+    text-style: bold;
+    text-align: center;
+    width: 100%;
+    margin-bottom: 1;
+}
+
+#new-project-form Label {
+    margin-top: 1;
+}
+
+#new-project-form Input {
+    width: 100%;
+}
+
+#new-project-form Select {
+    width: 100%;
+}
+
+#np-sources-list {
+    height: auto;
+}
+
+#np-sources-list Horizontal {
+    height: auto;
+    margin-top: 1;
+}
+
+#np-sources-list Input {
+    width: 1fr;
+}
+
+#np-sources-controls {
+    height: auto;
+    margin-top: 1;
+}
+
+#np-submit-row {
+    height: auto;
+    margin-top: 2;
+}
+
+#np-submit-row Button {
+    margin-right: 1;
+}
+
 #welcome-title {
     text-align: center;
     text-style: bold;
@@ -22,6 +78,7 @@ Button {
 #recent-label {
     text-align: center;
     text-style: bold;
+    width: 60;
     margin-top: 2;
     margin-bottom: 1;
 }
@@ -29,4 +86,9 @@ Button {
 #recent-list {
     width: 60;
     height: auto;
+}
+
+#recent-list ListItem Label {
+    text-align: center;
+    width: 100%;
 }
