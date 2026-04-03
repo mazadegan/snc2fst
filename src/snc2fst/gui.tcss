@@ -1,0 +1,32 @@
+WelcomeScreen {
+    align: center middle;
+}
+
+#welcome-title {
+    text-align: center;
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+#welcome-subtitle {
+    text-align: center;
+    width: 100%;
+    margin-bottom: 2;
+}
+
+Button {
+    width: 30;
+    margin-bottom: 1;
+}
+
+#recent-label {
+    text-align: center;
+    text-style: bold;
+    margin-top: 2;
+    margin-bottom: 1;
+}
+
+#recent-list {
+    width: 60;
+    height: auto;
+}

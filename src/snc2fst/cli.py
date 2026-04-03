@@ -836,5 +836,12 @@ def export_cmd(config_file, fmt, output):
         click.echo(rendered)
 
 
+@main.command("gui")
+def gui_cmd():
+    """Open the snc2fst GUI."""
+    from snc2fst.gui import run
+    run()
+
+
 if __name__ == "__main__":
     main()
