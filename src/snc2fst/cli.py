@@ -8,6 +8,7 @@ from pathlib import Path
 import tomllib
 import pynini
 from pydantic import ValidationError
+from snc2fst import __version__
 from snc2fst.models import GrammarConfig
 from snc2fst.alphabet import TokenizeError, check_alphabet, load_alphabet, tokenize, word_to_str
 from snc2fst.io import load_tests
@@ -118,6 +119,7 @@ def _run_meta_wizard(config_path: Path) -> None:
 
 
 @click.group()
+@click.version_option(__version__, prog_name="snc")
 def main():
     """SNC: Compile Search-and-Change grammars to OpenFST transducers."""
     pass

@@ -1,5 +1,5 @@
 {% set name = "snc2fst" %}
-{% set version = "1.1.0" %}
+{% set version = "1.1.1" %}
 
 package:
   name: {{ name }}
@@ -27,6 +27,10 @@ requirements:
     - pydantic >=2.0.0
     - questionary >=2.0.0
     - langcodes >=3.3.0
+    - fastapi >=0.100.0
+    - uvicorn >=0.20.0
+    - jinja2 >=3.0.0
+    - python-multipart >=0.0.9
     - pynini
 
 test:
@@ -34,6 +38,8 @@ test:
     - snc2fst
   commands:
     - snc --help
+    - snc --version
+    - python -c "import fastapi, uvicorn, jinja2, multipart"
 
 about:
   home: https://github.com/mazadegan/snc2fst
