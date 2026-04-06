@@ -137,3 +137,22 @@ def test_word_to_str_renders_eos():
 def test_word_to_str_renders_bracketed_word():
     word = [ALPHABET["a"], ALPHABET["b"]]
     assert word_to_str(bracket_word(word), ALPHABET) == "BOSabEOS"
+
+
+def test_word_to_str_maps_missing_feature_to_zero_valued_symbol():
+    alphabet = {
+        "A": {
+            "Syllabic": "+",
+            "Back": "+",
+            "High": "-",
+            "Low": "+",
+            "Atr": "0",
+        }
+    }
+    word = [{
+        "Syllabic": "+",
+        "Back": "+",
+        "High": "-",
+        "Low": "+",
+    }]
+    assert word_to_str(word, alphabet) == "A"

@@ -175,15 +175,22 @@ def strip_boundaries(word: Word) -> Word:
     return [s for s in word if s != BOS_SEGMENT and s != EOS_SEGMENT]
 
 
+def _segment_matches_symbol(seg: Segment, symbol_seg: Segment) -> bool:
+    """Return True when seg matches symbol_seg, treating 0 as unspecified."""
+    for feature in set(seg) | set(symbol_seg):
+        seg_value = seg.get(feature, "0")
+        symbol_value = symbol_seg.get(feature, "0")
+        if seg_value != symbol_value:
+            return False
+    return True
+
+
 def word_to_str(word: Word, alphabet: dict[str, Segment]) -> str:
     """Convert a Word back to a concatenated string of segment names.
 
     Segments that do not exactly match any alphabet entry are rendered as
     their feature bundle, e.g. [+F1 -F2], so output is always readable.
     """
-    rev: dict[frozenset, str] = {
-        frozenset(seg.items()): name for name, seg in alphabet.items()
-    }
     parts = []
     for seg in word:
         if seg == BOS_SEGMENT:
@@ -191,10 +198,14 @@ def word_to_str(word: Word, alphabet: dict[str, Segment]) -> str:
         elif seg == EOS_SEGMENT:
             parts.append("EOS")
         else:
-            key = frozenset(seg.items())
-            if key in rev:
-                parts.append(rev[key])
-            else:
+            rendered = None
+            for name, symbol_seg in alphabet.items():
+                if _segment_matches_symbol(seg, symbol_seg):
+                    rendered = name
+                    break
+            if rendered is None:
                 bundle = " ".join(f"{v}{f}" for f, v in sorted(seg.items()))
                 parts.append(f"[{bundle}]")
+            else:
+                parts.append(rendered)
     return "".join(parts)
