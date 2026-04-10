@@ -8,14 +8,3 @@ wheels/
 
 # Virtual environments
 .venv
-
-# Test files
-*.csv
-*.tsv
-*.json
-*.att
-*.fst
-*.sym
-
-# Sphinx build output
-docs/_build/
