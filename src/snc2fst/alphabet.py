@@ -1,13 +1,16 @@
 import csv
 from pathlib import Path
+
 import logical_phonology as lp
+
 from snc2fst.errors import AlphabetError
 
 
 def load_alphabet(
-    path: Path, delimiter: str = ","
+    path: Path, delimiter: str = ",", strict: bool = False
 ) -> tuple[lp.FeatureSystem, lp.Inventory]:
-    """Load an alphabet CSV/TSV file and return a (FeatureSystem, Inventory) pair.
+    """Load an alphabet CSV/TSV file and return a (FeatureSystem, Inventory)
+    pair.
 
     The file must have features as rows and segments as columns. The first
     column contains feature names; the first row contains segment names with
@@ -16,7 +19,10 @@ def load_alphabet(
 
     Args:
         path: Path to the alphabet file.
-        delimiter: Column delimiter. Defaults to ',' for CSV; use '\\t' for TSV.
+        delimiter: Column delimiter. Defaults to ',' for CSV; use '\\t' for
+        TSV.
+        strict: Ensures all rows in the input CSV/TSV file are of equal
+        length. Default False.
 
     Raises:
         AlphabetError: If the file cannot be read, is malformed, or contains
@@ -49,9 +55,19 @@ def load_alphabet(
             "'BOS' and 'EOS' are reserved."
         ) from e
 
+    if strict:
+        for row in rows[1:]:
+            if len(row) - 1 != len(segments):
+                feature = row[0]
+                raise AlphabetError(
+                    f"Row '{feature}' has {len(row) - 1} values. "
+                    f"Expected {len(segments)}."
+                )
+
     for row in rows[1:]:
         feature = row[0]
         for seg, val in zip(segments, row[1:]):
+            val = val.strip()  # TODO: add test case to cover this!
             if val in ("+", "-"):
                 segment_dict[seg][feature] = lp.FeatureValue.from_str(val)
 

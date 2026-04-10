@@ -1,10 +1,9 @@
-import pytest
-
 from pathlib import Path
-from snc2fst.alphabet import load_alphabet
 
 import logical_phonology as lp
+import pytest
 
+from snc2fst.alphabet import load_alphabet
 from snc2fst.errors import AlphabetError
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -55,6 +54,18 @@ def test_loads_tsv() -> None:
     fs, inv = load_alphabet(FIXTURES / "simple.tsv", delimiter="\t")
     assert fs.valid_features == frozenset(["F1", "F2", "F3"])
     assert len(inv) == 3**3 + 2
+
+
+def test_strict_mode_raises_on_unequal_rows() -> None:
+    with pytest.raises(AlphabetError) as exc_info:
+        load_alphabet(FIXTURES / "unequal_rows.csv", strict=True)
+    assert "values" in str(exc_info.value).lower()
+
+
+def test_non_strict_mode_accepts_unequal_rows() -> None:
+    # should not raise — unequal rows are silently handled
+    _, inv = load_alphabet(FIXTURES / "unequal_rows.csv", strict=False)
+    assert "A" in inv
 
 
 @pytest.mark.parametrize("segment_name", SEGMENT_NAMES)

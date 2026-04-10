@@ -20,7 +20,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "black>=24.0.0",
+    "ruff",
     "pytest>=8.0.0",
 ]
 
@@ -28,8 +28,14 @@ dev = [
 snc2fst = "snc2fst.cli:main"
 snc = "snc2fst.cli:main"
 
-[tool.black]
+[tool.ruff]
 line-length = 79
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]  # pycodestyle, pyflakes, isort
+
+[tool.ruff.format]
+quote-style = "double"
 
 [tool.setuptools.package-data]
 "snc2fst" = [
