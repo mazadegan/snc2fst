@@ -13,3 +13,23 @@ class RuleError(SncError):
     """
     Raised when a rule references invalid features or is otherwise malformed.
     """
+
+
+class DSLError(SncError):
+    """Base class for DSL parsing and validation errors."""
+
+
+class TokenizationError(DSLError):
+    """Raised when an unexpected character is encountered during tokenization.
+
+    Attributes:
+        char: The unexpected character that caused the error.
+    """
+
+    def __init__(self, char: str):
+        self.char = char
+        super().__init__(f"Unexpected character: {char!r}")
+
+
+class ParseError(DSLError):
+    """Raised when a syntactically invalid expression is encountered."""
