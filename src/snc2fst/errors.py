@@ -33,3 +33,12 @@ class TokenizationError(DSLError):
 
 class ParseError(DSLError):
     """Raised when a syntactically invalid expression is encountered."""
+
+
+class EvalError(Exception):
+    """Raised when a DSL expression cannot be evaluated.
+
+    This may occur when an operator receives a word of the wrong length
+    (e.g. a multi-segment word passed to unify), or when a referenced
+    segment symbol is not in the inventory.
+    """
