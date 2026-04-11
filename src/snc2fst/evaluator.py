@@ -2,6 +2,7 @@ import logical_phonology as lp
 
 from snc2fst import dsl_ast as ast
 from snc2fst.errors import EvalError
+from snc2fst.models import Rule
 
 
 def _as_segment(val: lp.Word | lp.Segment | bool, op_name: str) -> lp.Segment:
@@ -152,3 +153,113 @@ def evaluate(
                 return evaluate(else_node, inr, trm, fs, inv)
         case _:
             raise EvalError(f"Cannot evaluate node: {node!r}")
+
+
+def _find_trigger(
+    word: lp.Word,
+    trm: lp.NaturalClassSequence,
+    anchor: int,
+    rightward: bool,
+) -> lp.Word | None:
+    """Find the nearest match of trm in word relative to anchor.
+
+    Searches rightward from anchor (inclusive) toward the end of the word,
+    or leftward (exclusive) toward the beginning, returning the first
+    matching window found.
+
+    Args:
+        word: The word to search.
+        trm: The natural class sequence to match against.
+        anchor: The position in word to search from.
+        rightward: If True, search right from anchor; if False, search left.
+
+    Returns:
+        The first matching substring of word as an lp.Word, or None if no
+        match is found or trm is empty.
+    """
+    n = len(trm)
+    if n == 0:
+        return None
+    if rightward:
+        start = trm.find_first(word, from_pos=anchor)
+    else:
+        start = trm.find_last(word, before_pos=anchor)
+    return word[start : start + n] if start is not None else None
+
+
+def _check_boundary_positions(
+    word: lp.Word, rule_id: str, fs: lp.FeatureSystem
+) -> None:
+    """Raise EvalError if BOS/EOS appear at illegal positions in word."""
+    bos_count = 0
+    eos_count = 0
+    for i, seg in enumerate(word):
+        if seg == fs.BOS:
+            bos_count += 1
+            if i != 0:
+                raise EvalError(
+                    f"Rule '{rule_id}': BOS boundary ended up at position {i + 1} "  # noqa: E501
+                    "(must be at position 1)."
+                )
+        if seg == fs.EOS:
+            eos_count += 1
+            if i != len(word) - 1:
+                raise EvalError(
+                    f"Rule '{rule_id}': EOS boundary ended up at position {i + 1} "  # noqa: E501
+                    f"(must be at position {len(word)})."
+                )
+    if bos_count > 1:
+        raise EvalError(
+            f"Rule '{rule_id}': multiple BOS boundaries in output."
+        )
+    if eos_count > 1:
+        raise EvalError(
+            f"Rule '{rule_id}': multiple EOS boundaries in output."
+        )
+
+
+def apply_rule(
+    rule: Rule,
+    out_ast: ast.Expr,
+    word: lp.Word,
+    fs: lp.FeatureSystem,
+    inv: lp.Inventory,
+) -> lp.Word:
+    """Apply a single S&C rule to a word, returning the transformed word.
+    The word is bracketed with BOS/EOS pseudo-segments before processing and
+    stripped after. Scans left-to-right for non-overlapping target windows
+    (INR). For each target, searches in direction Dir for the nearest window
+    that models TRM (which may be non-adjacent). When found, OUT is evaluated
+    and the target is replaced.
+    """
+    inr_ncs = rule.inr_as_ncs(fs)
+    trm_ncs = rule.trm_as_ncs(fs)
+    m = len(inr_ncs)
+    n = len(trm_ncs)
+    result = fs.add_boundaries(word)
+    i = 0
+    while i <= len(result) - m:
+        if not inr_ncs.matches_at(result, i):
+            i += 1
+            continue
+        target = result[i : i + m]
+        if rule.Dir == "R":
+            trigger = _find_trigger(result, trm_ncs, i + m, rightward=True)
+        else:
+            trigger = _find_trigger(result, trm_ncs, i - n, rightward=False)
+        if trigger is None:
+            i += 1
+            continue
+        try:
+            raw = evaluate(out_ast, target, trigger, fs, inv)
+        except EvalError as e:
+            raise EvalError(f"Rule '{rule.Id}': {e}") from e
+        if isinstance(raw, bool):
+            raise EvalError(
+                f"Rule '{rule.Id}': Out expression evaluated to a boolean"
+            )
+        out = fs.word([raw]) if isinstance(raw, lp.Segment) else raw
+        result = result[:i] + out + result[i + m :]
+        i += len(out)
+    _check_boundary_positions(result, rule.Id, fs)
+    return fs.remove_boundaries(result)
