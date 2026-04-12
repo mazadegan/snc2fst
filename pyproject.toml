@@ -41,6 +41,4 @@ quote-style = "double"
 "snc2fst" = [
     "templates/*.toml", "templates/*.csv", "templates/*.tsv",
     "templates/starters/**/*",
-    "web/static/**/*",
-    "web/templates/**/*",
 ]

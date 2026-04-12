@@ -8,3 +8,23 @@ wheels/
 
 # Virtual environments
 .venv
+.env
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# pytest
+.pytest_cache/
+
+# ruff/mypy caches
+.ruff_cache/
+.mypy_cache/
+
+# IDE
+.vscode/
+.idea/
+
+# Distribution / packaging
+*.egg
+MANIFEST

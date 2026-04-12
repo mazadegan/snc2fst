@@ -1,0 +1,16 @@
+alphabet_path = "alphabet.csv"
+tests_path = "tests.csv"
+
+[meta]
+title = ""
+language = ""
+path_to_readme = "."
+sources = []
+compilable = true
+
+[[rules]]
+Id = "R_0"
+Inr = [["-F2"]]
+Trm = [["+F1"]]
+Dir = "L"
+Out = "(unify INR[1] {+F1})"
