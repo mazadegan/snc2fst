@@ -15,7 +15,7 @@ dependencies = [
     "questionary>=2.0.0",
     "langcodes[data]>=3.3.0",
     "prettytable>=3.0.0",
-    "logical-phonology>=0.2.8",
+    "logical-phonology>=0.2.9",
 ]
 
 [project.optional-dependencies]

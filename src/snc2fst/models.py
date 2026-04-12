@@ -7,7 +7,7 @@ from pydantic import BaseModel, field_validator
 
 from snc2fst.errors import RuleError
 
-FEATURE_PATTERN = re.compile(r"^([+\-])(\w+)$")
+FEATURE_PATTERN = re.compile(r"^([+\-\*])(\w+)$")
 
 
 class Meta(BaseModel):
@@ -36,25 +36,40 @@ class Rule(BaseModel):
     def _as_ncs(
         self, sequence: list[list[tuple[str, str]]], fs: lp.FeatureSystem
     ) -> lp.NaturalClassSequence:
-        """Convert a parsed Inr or Trm specification into an LP
-        NaturalClassSequence.
+        """Convert a parsed Inr or Trm specification into an LP NaturalClassSequence.
 
         Raises:
             RuleError: If any feature name is not in the feature system.
-        """
+        """  # noqa: E501
         try:
-            return fs.natural_class_sequence(
-                [
-                    fs.natural_class(
-                        {
-                            feature: lp.FeatureValue.from_str(value)
-                            for value, feature in nc_spec
-                        }
+            classes: list[lp.NaturalClass | lp.NaturalClassUnion] = []
+            for nc_spec in sequence:
+                starred = [(name) for sign, name in nc_spec if sign == "*"]
+                valued = {
+                    name: lp.FeatureValue.from_str(sign)
+                    for sign, name in nc_spec
+                    if sign != "*"
+                }
+                if starred:
+                    from itertools import product
+
+                    combos = list(
+                        product(*[[lp.POS, lp.NEG] for _ in starred])
                     )
-                    for nc_spec in sequence
-                ]
-            )
-        except lp.UnknownFeatureError as e:
+                    ncs: list[lp.NaturalClass] = []
+                    for combo in combos:
+                        features = dict(valued)
+                        for name, val in zip(starred, combo):
+                            features[name] = val
+                        ncs.append(fs.natural_class(features))
+                    nc: lp.NaturalClass | lp.NaturalClassUnion = ncs[0]
+                    for rest in ncs[1:]:
+                        nc = nc | rest
+                    classes.append(nc)
+                else:
+                    classes.append(fs.natural_class(valued))
+            return fs.natural_class_sequence(classes)
+        except lp.errors.UnknownFeatureError as e:
             raise RuleError(
                 f"Rule '{self.Id}': unknown feature(s) {e.unknown}."
             ) from e
@@ -89,7 +104,7 @@ class Rule(BaseModel):
                 if not match:
                     raise ValueError(
                         f"Invalid feature syntax: '{valued_feature_str}'. "
-                        f"Features must begin with '+' or '-', followed by the feature name. "  # noqa: E501
+                        f"Features must begin with '+', '-', or '*', followed by the feature name. "  # noqa: E501
                         f"(Expected pattern: {FEATURE_PATTERN.pattern})"
                     )
                 sign, feature_name = match.groups()
