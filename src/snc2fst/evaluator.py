@@ -83,7 +83,7 @@ def evaluate(
     trm: lp.Word,
     fs: lp.FeatureSystem,
     inv: lp.Inventory,
-) -> lp.Word | lp.Segment | bool:
+) -> lp.Word | bool:
     """Evaluate a DSL expression with bound INR and TRM windows.
 
     Args:
@@ -112,10 +112,10 @@ def evaluate(
         case ast.Symbol(name=name):
             if name not in inv:
                 raise EvalError(f"Unknown segment symbol: '{name}'")
-            return inv[name]
+            return fs.word([inv[name]])
         case ast.FeatureSpec() as fs_node:
             # Bare feature spec in Concat = epenthetic underspecified segment
-            return _spec_to_segment(fs_node, fs)
+            return fs.word([_spec_to_segment(fs_node, fs)])
         case ast.Unify(segment=seg_node, features=features_node):
             seg = _as_segment(evaluate(seg_node, inr, trm, fs, inv), "unify")
             if isinstance(features_node, ast.FeatureSpec):
@@ -124,15 +124,15 @@ def evaluate(
                 other = _as_segment(
                     evaluate(features_node, inr, trm, fs, inv), "unify"
                 )
-            return seg.unify(other)
+            return fs.word([seg.unify(other)])
         case ast.Subtract(segment=seg_node, features=features_node):
             seg = _as_segment(
                 evaluate(seg_node, inr, trm, fs, inv), "subtract"
             )
-            return seg.subtract(_spec_to_segment(features_node, fs))
+            return fs.word([seg.subtract(_spec_to_segment(features_node, fs))])
         case ast.Project(segment=seg_node, names=fn):
             seg = _as_segment(evaluate(seg_node, inr, trm, fs, inv), "proj")
-            return seg.project(frozenset(fn.names))
+            return fs.word([seg.project(frozenset(fn.names))])
         case ast.Concat(args=args):
             result: lp.Word = fs.word([])
             for arg in args:
@@ -235,7 +235,6 @@ def apply_rule(
     inr_ncs = rule.inr_as_ncs(fs)
     trm_ncs = rule.trm_as_ncs(fs)
     m = len(inr_ncs)
-    n = len(trm_ncs)
     result = fs.add_boundaries(word)
     i = 0
     while i <= len(result) - m:
@@ -243,10 +242,12 @@ def apply_rule(
             i += 1
             continue
         target = result[i : i + m]
-        if rule.Dir == "R":
+        if len(trm_ncs) == 0:
+            trigger: lp.Word | None = fs.word([])
+        elif rule.Dir == "R":
             trigger = _find_trigger(result, trm_ncs, i + m, rightward=True)
         else:
-            trigger = _find_trigger(result, trm_ncs, i - n, rightward=False)
+            trigger = _find_trigger(result, trm_ncs, i, rightward=False)
         if trigger is None:
             i += 1
             continue
@@ -258,7 +259,7 @@ def apply_rule(
             raise EvalError(
                 f"Rule '{rule.Id}': Out expression evaluated to a boolean"
             )
-        out = fs.word([raw]) if isinstance(raw, lp.Segment) else raw
+        out = raw
         result = result[:i] + out + result[i + m :]
         i += len(out)
     _check_boundary_positions(result, rule.Id, fs)
