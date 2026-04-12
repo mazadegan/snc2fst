@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import click
+import pynini  # type: ignore[import-untyped]
 
 STARTERS = [
     "english_past_tense",
@@ -308,3 +309,162 @@ def export_cmd(config_file: Path, fmt: str, output: Path | None) -> None:
     else:
         output.write_text(result)
         click.echo(f"[✓] Exported to '{output}'.")
+
+
+@main.command(name="compile")
+@click.argument(
+    "config_file", type=click.Path(exists=True, dir_okay=False, path_type=Path)
+)
+@click.option(
+    "--att",
+    is_flag=True,
+    default=False,
+    help="Also write .att text files alongside the .fst binaries.",
+)
+@click.option(
+    "--max-arcs",
+    default=1_000_000,
+    show_default=True,
+    type=int,
+    help="Abort compilation of a rule if its FST exceeds this many arcs.",
+)
+def compile_cmd(config_file: Path, att: bool, max_arcs: int) -> None:
+    """Compile grammar rules to OpenFST transducers.
+
+    Writes one .fst file per rule into a 'transducers/' directory at the
+    project root (next to config.toml). With --att, also writes a .att text
+    file for each rule.
+
+    Rules are named by their position and Id, e.g. '01_vowel-harmony.fst'.
+    """
+    import warnings
+
+    from snc2fst.alphabet import load_alphabet
+    from snc2fst.compiler import compile_rule, compute_alphabets
+    from snc2fst.errors import CompileError
+    from snc2fst.io import load_config
+
+    try:
+        config = load_config(config_file)
+    except Exception as e:
+        click.echo(f"[x] Failed to load config: {e}", err=True)
+        raise click.Abort()
+
+    base_dir = config_file.parent
+
+    try:
+        fs, inv = load_alphabet(base_dir / config.alphabet_path)
+    except Exception as e:
+        click.echo(f"[x] Failed to load alphabet: {e}", err=True)
+        raise click.Abort()
+
+    out_dir = base_dir / "transducers"
+    out_dir.mkdir(exist_ok=True)
+
+    click.echo(f"Compiling {len(config.rules)} rule(s) → {out_dir}/")
+
+    # Compute per-rule inventories (propagates output alphabet between rules).
+    # We capture warnings here so we can echo them via click rather than
+    # letting them go to stderr in an unpredictable format.
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        try:
+            alphabets = compute_alphabets(config.rules, fs, inv)
+        except Exception as e:
+            click.echo(f"[x] Alphabet propagation failed: {e}", err=True)
+            raise click.Abort()
+
+    for w in caught:
+        click.echo(f"  [!] {w.message}", err=True)
+
+    # Compile each rule
+    for idx, (rule, rule_inv) in enumerate(
+        zip(config.rules, alphabets), start=1
+    ):
+        stem = f"{idx:02d}_{rule.Id}"
+        fst_path = out_dir / f"{stem}.fst"
+        att_path = out_dir / f"{stem}.att"
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            try:
+                fst = compile_rule(rule, fs, rule_inv, max_arcs=max_arcs)
+            except CompileError as e:
+                click.echo(f"  [x] Rule '{rule.Id}': {e}", err=True)
+                raise click.Abort()
+            except Exception as e:
+                click.echo(
+                    f"  [x] Rule '{rule.Id}': unexpected error: {e}", err=True
+                )
+                raise click.Abort()
+
+        for w in caught:
+            click.echo(f"  [!] {w.message}", err=True)
+
+        # Write binary .fst
+        fst.write(str(fst_path))
+
+        # Optionally write .att text format
+        if att:
+            _write_att(fst, att_path)
+
+        arc_count = sum(fst.num_arcs(s) for s in fst.states())
+        state_count = fst.num_states()
+        click.echo(
+            f"  [✓] {stem}.fst  "
+            f"({state_count} states, {arc_count} arcs)"
+            + (f"  → {stem}.att" if att else "")
+        )
+
+    click.echo(
+        f"\n[✓] Done. {len(config.rules)} transducer(s) written to '{out_dir}'."  # noqa: E501
+    )
+
+
+def _write_att(fst: pynini.Fst, path: Path) -> None:
+    """Write an FST in AT&T text format.
+
+    Format per line:
+      src_state  dst_state  input_label  output_label  [weight]
+    Final states:
+      state_id  [weight]
+
+    Label 0 is rendered as <eps>.
+    """
+    import pynini
+
+    sym_in = fst.input_symbols()
+    sym_out = fst.output_symbols()
+
+    def label_str(sym_table: pynini.SymbolTable, label: int) -> str:  # type: ignore[name-defined]
+        if label == 0:
+            return "<eps>"
+        name = sym_table.find(label)
+        return name if name else str(label)
+
+    lines: list[str] = []
+    # Emit arcs — start state first for convention, then rest
+    start = fst.start()
+    state_order = [start] + [s for s in fst.states() if s != start]
+
+    for state in state_order:
+        for arc in fst.arcs(state):
+            il = label_str(sym_in, arc.ilabel)
+            ol = label_str(sym_out, arc.olabel)
+            weight = float(arc.weight)
+            if weight == 0.0:
+                lines.append(f"{state}\t{arc.nextstate}\t{il}\t{ol}")
+            else:
+                lines.append(f"{state}\t{arc.nextstate}\t{il}\t{ol}\t{weight}")
+
+    # Emit final states
+    for state in state_order:
+        w = fst.final(state)
+        if w != pynini.Weight.zero("tropical"):  # type: ignore[attr-defined]
+            fw = float(w)
+            if fw == 0.0:
+                lines.append(str(state))
+            else:
+                lines.append(f"{state}\t{fw}")
+
+    path.write_text("\n".join(lines) + "\n")

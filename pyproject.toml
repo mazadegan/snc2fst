@@ -16,6 +16,7 @@ dependencies = [
     "langcodes[data]>=3.3.0",
     "prettytable>=3.0.0",
     "logical-phonology>=0.2.9",
+    "pynini",  # install via conda: conda install conda-forge::pynini
 ]
 
 [project.optional-dependencies]
@@ -36,6 +37,15 @@ select = ["E", "F", "I"]  # pycodestyle, pyflakes, isort
 
 [tool.ruff.format]
 quote-style = "double"
+
+[tool.pyright] # pynini has incomplete type stubs, pyright complains otherwise.
+reportMissingModuleSource = false
+ignore = ["src/snc2fst/compiler.py"]
+
+[tool.mypy] # pynini has incomplete type stubs, mypy complains otherwise.
+[[tool.mypy.overrides]]
+module = "snc2fst.compiler"
+ignore_errors = true
 
 [tool.setuptools.package-data]
 "snc2fst" = [

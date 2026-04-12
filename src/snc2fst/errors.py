@@ -35,6 +35,10 @@ class ParseError(DSLError):
     """Raised when a syntactically invalid expression is encountered."""
 
 
+class CompileError(SncError):
+    """Raised when a rule cannot be compiled to an FST."""
+
+
 class EvalError(Exception):
     """Raised when a DSL expression cannot be evaluated.
 
