@@ -76,3 +76,21 @@ def test_eval_starter(starter: str) -> None:
     assert result.exit_code == 0, result.output
     assert "passed" in result.output
     assert "0/" not in result.output
+
+
+@pytest.mark.parametrize("starter", STARTERS)
+def test_export_txt_starter(starter: str) -> None:
+    runner = CliRunner()
+    config = str(STARTERS_PATH / starter / "config.toml")
+    result = runner.invoke(main, ["export", config, "--format", "txt"])
+    assert result.exit_code == 0, result.output
+    assert "=== Alphabet ===" in result.output
+
+
+@pytest.mark.parametrize("starter", STARTERS)
+def test_export_latex_starter(starter: str) -> None:
+    runner = CliRunner()
+    config = str(STARTERS_PATH / starter / "config.toml")
+    result = runner.invoke(main, ["export", config, "--format", "latex"])
+    assert result.exit_code == 0, result.output
+    assert "\\begin{tabular}" in result.output
