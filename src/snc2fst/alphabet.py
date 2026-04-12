@@ -42,7 +42,8 @@ def load_alphabet(
         raise AlphabetError(f"'{path}' has no segment columns.")
 
     segments: list[str] = [s.strip() for s in rows[0][1:]]
-    feature_set: list[str] = [row[0].strip() for row in rows[1:]]
+    data_rows = [row for row in rows[1:] if row]
+    feature_set: list[str] = [row[0].strip() for row in data_rows]
     segment_dict: dict[str, dict[str, lp.FeatureValue]] = {
         seg: {} for seg in segments
     }
@@ -56,7 +57,7 @@ def load_alphabet(
         ) from e
 
     if strict:
-        for row in rows[1:]:
+        for row in data_rows:
             if len(row) - 1 != len(segments):
                 feature = row[0].strip()
                 raise AlphabetError(
@@ -64,7 +65,7 @@ def load_alphabet(
                     f"Expected {len(segments)}."
                 )
 
-    for row in rows[1:]:
+    for row in data_rows:
         feature = row[0].strip()
         for seg, val in zip(segments, row[1:]):
             val = val.strip()  # TODO: add test case to cover this!

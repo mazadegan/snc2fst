@@ -1,5 +1,6 @@
 # tests/test_cli.py
 from importlib.resources import files
+from pathlib import Path
 
 import pytest
 from click.testing import CliRunner
@@ -15,6 +16,48 @@ STARTERS = [
     "turkish_k_deletion",
     "votic_vowel_harmony",
 ]
+
+
+def test_init_blank(tmp_path: Path) -> None:
+    runner = CliRunner()
+    target = tmp_path / "my_project"
+    result = runner.invoke(
+        main,
+        [
+            "init",
+            str(target),
+            "--starter",
+            "blank",
+            "--title",
+            "Test Grammar",
+            "--language",
+            "tst",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+
+
+@pytest.mark.parametrize("starter", STARTERS)
+def test_init_starter(starter: str, tmp_path: Path) -> None:
+    runner = CliRunner()
+    target = tmp_path / "my_project"
+    result = runner.invoke(
+        main,
+        [
+            "init",
+            str(target),
+            "--starter",
+            starter,
+            "--title",
+            "Test",
+            "--language",
+            "tst",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert (target / "config.toml").exists()
+    assert (target / "alphabet.csv").exists()
+    assert (target / "tests.csv").exists()
 
 
 @pytest.mark.parametrize("starter", STARTERS)
