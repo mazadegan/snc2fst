@@ -197,9 +197,19 @@ def validate_cmd(config_file: Path) -> None:
     "config_file", type=click.Path(exists=True, dir_okay=False, path_type=Path)
 )
 @click.argument("word", required=False, default=None)
-def eval_cmd(config_file: Path, word: str | None) -> None:
-    """Apply grammar rules to a word or run the full test suite."""
+@click.option(
+    "--fst",
+    "use_fst",
+    is_flag=True,
+    default=False,
+    help="Run test suite through compiled FSTs in the transducers/ directory.",
+)
+def eval_cmd(config_file: Path, word: str | None, use_fst: bool) -> None:
+    """Apply grammar rules to a word or run the full test suite.
 
+    With --fst, runs the test suite through the compiled FSTs in the
+    transducers/ directory rather than the reference evaluator.
+    """
     from snc2fst.alphabet import load_alphabet
     from snc2fst.dsl import parse
     from snc2fst.evaluator import apply_rule
@@ -217,6 +227,81 @@ def eval_cmd(config_file: Path, word: str | None) -> None:
         click.echo(f"[x] Failed to load alphabet: {e}", err=True)
         raise click.Abort()
 
+    # ------------------------------------------------------------------
+    # --fst mode: load compiled transducers and run test suite through them
+    # ------------------------------------------------------------------
+    if use_fst:
+        try:
+            import pynini
+        except ImportError:
+            click.echo(
+                "[x] The --fst flag requires pynini, which must be installed "
+                "via conda:\n\n    conda install -c conda-forge pynini\n",
+                err=True,
+            )
+            raise click.Abort()
+
+        from snc2fst.compiler import transduce
+
+        transducers_dir = config_file.parent / "transducers"
+        expected = len(config.rules)
+
+        if not transducers_dir.exists():
+            click.echo(
+                f"[x] No transducers/ directory found. "
+                f"Compile the grammar first:\n\n"
+                f"    snc compile {config_file}\n",
+                err=True,
+            )
+            raise click.Abort()
+
+        fst_files = sorted(transducers_dir.glob("*.fst"))
+        if len(fst_files) != expected:
+            click.echo(
+                f"[x] Expected {expected} compiled FST(s) in '{transducers_dir}' "
+                f"but found {len(fst_files)}. "
+                f"Recompile the grammar:\n\n"
+                f"    snc compile {config_file}\n",
+                err=True,
+            )
+            raise click.Abort()
+
+        fsts = [pynini.Fst.read(str(p)) for p in fst_files]
+
+        def apply_fst_chain(input_word: str) -> str:
+            tokenized = inv.tokenize(input_word)
+            if isinstance(tokenized, list):
+                raise click.ClickException(
+                    f"Ambiguous tokenization for {input_word!r} — "
+                    "use spaces to disambiguate."
+                )
+            current = [inv.name_of(seg) for seg in tokenized]
+            for rule, fst in zip(config.rules, fsts):
+                current = transduce(fst, rule, current)
+            return "".join(current)
+
+        tests = load_tests(config_file.parent / config.tests_path)
+        passed = failed = 0
+        for inp, expected_out in tests:
+            try:
+                result = apply_fst_chain(inp)
+                ok = result == expected_out
+                passed += ok
+                failed += not ok
+                status = "PASS" if ok else "FAIL"
+                click.echo(
+                    f"  [{status}] {inp} → {result}"
+                    + ("" if ok else f"  (expected {expected_out})")
+                )
+            except Exception as e:
+                click.echo(f"  [ERROR] {inp}: {e}")
+                failed += 1
+        click.echo(f"\n{passed}/{passed + failed} passed")
+        return
+
+    # ------------------------------------------------------------------
+    # Standard evaluator mode
+    # ------------------------------------------------------------------
     try:
         out_asts = {rule.Id: parse(rule.Out) for rule in config.rules}
     except Exception as e:
@@ -227,7 +312,8 @@ def eval_cmd(config_file: Path, word: str | None) -> None:
         tokenized = inv.tokenize(input_word)
         if isinstance(tokenized, list):
             raise click.ClickException(
-                f"Ambiguous tokenization for {input_word!r} — use spaces to disambiguate."  # noqa: E501
+                f"Ambiguous tokenization for {input_word!r} — "
+                "use spaces to disambiguate."
             )
         w = tokenized
         for rule in config.rules:
@@ -243,72 +329,23 @@ def eval_cmd(config_file: Path, word: str | None) -> None:
             raise click.Abort()
         return
 
-    # test suite mode
     tests = load_tests(config_file.parent / config.tests_path)
     passed = failed = 0
-    for inp, expected in tests:
+    for inp, expected_out in tests:
         try:
             result = apply_chain(inp)
-            ok = result == expected
+            ok = result == expected_out
             passed += ok
             failed += not ok
             status = "PASS" if ok else "FAIL"
             click.echo(
                 f"  [{status}] {inp} → {result}"
-                + ("" if ok else f"  (expected {expected})")
+                + ("" if ok else f"  (expected {expected_out})")
             )
         except Exception as e:
             click.echo(f"  [ERROR] {inp}: {e}")
             failed += 1
     click.echo(f"\n{passed}/{passed + failed} passed")
-
-
-@main.command(name="export")
-@click.argument(
-    "config_file", type=click.Path(exists=True, dir_okay=False, path_type=Path)
-)
-@click.option(
-    "--format",
-    "fmt",
-    type=click.Choice(["txt", "latex"]),
-    default="txt",
-    show_default=True,
-    help="Output format.",
-)
-@click.option(
-    "--output",
-    "-o",
-    type=click.Path(path_type=Path),
-    default=None,
-    help="Output file. Defaults to stdout.",
-)
-def export_cmd(config_file: Path, fmt: str, output: Path | None) -> None:
-    """Export a grammar to Unicode text or LaTeX format."""
-    from snc2fst.alphabet import load_alphabet
-    from snc2fst.export import export_latex, export_txt
-    from snc2fst.io import load_config
-
-    try:
-        config = load_config(config_file)
-    except Exception as e:
-        click.echo(f"[x] Failed to load config: {e}", err=True)
-        raise click.Abort()
-
-    try:
-        _, inv = load_alphabet(config_file.parent / config.alphabet_path)
-    except Exception as e:
-        click.echo(f"[x] Failed to load alphabet: {e}", err=True)
-        raise click.Abort()
-
-    result = (
-        export_txt(config, inv) if fmt == "txt" else export_latex(config, inv)
-    )
-
-    if output is None:
-        click.echo(result)
-    else:
-        output.write_text(result)
-        click.echo(f"[✓] Exported to '{output}'.")
 
 
 @main.command(name="compile")
