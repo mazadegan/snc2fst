@@ -167,18 +167,6 @@ def compute_alphabets(
 _DEFAULT_MAX_ARCS = 1_000_000
 
 
-def _check_arc_limit(fst: pynini.Fst, rule_id: str, max_arcs: int) -> None:  # type: ignore[misc]
-    """Raise CompileError if the FST has exceeded max_arcs."""
-    count: int = 0
-    for s in fst.states():  # type: ignore[attr-defined]
-        count += fst.num_arcs(s)  # type: ignore[attr-defined]
-    if count > max_arcs:
-        raise CompileError(
-            f"Rule '{rule_id}': FST exceeded arc limit ({count} > {max_arcs}). "  # noqa: E501
-            "Pass a higher --max-arcs value if this rule is intentionally large."  # noqa: E501
-        )
-
-
 # ---------------------------------------------------------------------------
 # Symbol table helpers
 # ---------------------------------------------------------------------------
@@ -212,6 +200,7 @@ def _emit_chain(
     w: pynini.Weight,
     rule_id: str,
     max_arcs: int,
+    arc_count: list[int],
 ) -> None:
     """Add arcs from src consuming ilabel and emitting out_names, ending at dst.
 
@@ -219,9 +208,19 @@ def _emit_chain(
     followed by epsilon-input arcs for the remaining output symbols.
     Checks arc limit after each arc addition.
     """  # noqa: E501
+
+    def _add(s: int, arc: pynini.Arc) -> None:
+        fst.add_arc(s, arc)
+        arc_count[0] += 1
+        if arc_count[0] > max_arcs:
+            raise CompileError(
+                f"Rule '{rule_id}': FST exceeded arc limit "
+                f"({arc_count[0]} > {max_arcs}). "
+                "Pass a higher --max-arcs value if this rule is intentionally large."  # noqa: E501
+            )
+
     if not out_names:
-        fst.add_arc(src, pynini.Arc(ilabel, 0, w, dst))
-        _check_arc_limit(fst, rule_id, max_arcs)
+        _add(src, pynini.Arc(ilabel, 0, w, dst))
         return
 
     nodes = (
@@ -229,9 +228,7 @@ def _emit_chain(
     )
     for i, name in enumerate(out_names):
         il = ilabel if i == 0 else 0
-        ol = sym.find(name)
-        fst.add_arc(nodes[i], pynini.Arc(il, ol, w, nodes[i + 1]))
-        _check_arc_limit(fst, rule_id, max_arcs)
+        _add(nodes[i], pynini.Arc(il, sym.find(name), w, nodes[i + 1]))
 
 
 # ---------------------------------------------------------------------------
@@ -291,6 +288,8 @@ def _compile_n1_m1(
         If x ∈ L(Inr): emit Out(x, σ); move to q_x or q_σ.
         Else:           emit x unchanged; move to q_x or q_σ.
     """
+    arc_count: list[int] = [0]
+
     sym = _build_sym_table(inv)
     w = pynini.Weight.one("tropical")
     fst = pynini.Fst()
@@ -317,7 +316,16 @@ def _compile_n1_m1(
         xl = sym.find(inv.name_of(x_seg))
         dst: int = trm_states[x_seg] if x_seg in trm_states else q_f
         _emit_chain(
-            fst, sym, q_f, xl, [inv.name_of(x_seg)], dst, w, rule.Id, max_arcs
+            fst,
+            sym,
+            q_f,
+            xl,
+            [inv.name_of(x_seg)],
+            dst,
+            w,
+            rule.Id,
+            max_arcs,
+            arc_count,
         )
 
     # Transitions from each trigger state q_σ
@@ -335,7 +343,16 @@ def _compile_n1_m1(
             # Next state: new trigger if x ∈ L(Trm), else stay at q_σ
             dst: int = trm_states[x_seg] if x_seg in trm_states else q_sigma
             _emit_chain(
-                fst, sym, q_sigma, xl, out_names, dst, w, rule.Id, max_arcs
+                fst,
+                sym,
+                q_sigma,
+                xl,
+                out_names,
+                dst,
+                w,
+                rule.Id,
+                max_arcs,
+                arc_count,
             )
 
     fst.set_input_symbols(sym)
@@ -376,6 +393,8 @@ def _compile_n_m0(
     than via an epsilon arc, which eliminates the mid-string nondeterminism
     that would otherwise arise from epsilon-input flush arcs.
     """
+    arc_count: list[int] = [0]
+
     n = len(rule.Inr)
     dir_r = rule.Dir == "R"
     sym = _build_sym_table(inv)
@@ -417,7 +436,9 @@ def _compile_n_m0(
                 # taken mid-string, preventing nondeterministic early flushing.
                 if len(new_buf) == n:
                     buf_segs = [inv[nm] for nm in new_buf]
-                    check_segs = list(reversed(buf_segs)) if dir_r else buf_segs
+                    check_segs = (
+                        list(reversed(buf_segs)) if dir_r else buf_segs
+                    )
                     check_word = fs.word(check_segs)
                     if check_word in inr_ncs:
                         out_names = _out_names_for(
@@ -427,8 +448,16 @@ def _compile_n_m0(
                             out_names = list(reversed(out_names))
                         next_buf = ()
                         _emit_chain(
-                            fst, sym, src, xl, out_names,
-                            get_state(next_buf), w, rule.Id, max_arcs,
+                            fst,
+                            sym,
+                            src,
+                            xl,
+                            out_names,
+                            get_state(next_buf),
+                            w,
+                            rule.Id,
+                            max_arcs,
+                            arc_count,
                         )
                         if next_buf not in visited:
                             visited.add(next_buf)
@@ -438,8 +467,16 @@ def _compile_n_m0(
                 flush_names = list(buf) + [x_name]
                 next_buf = ()
                 _emit_chain(
-                    fst, sym, src, xl, flush_names,
-                    get_state(next_buf), w, rule.Id, max_arcs,
+                    fst,
+                    sym,
+                    src,
+                    xl,
+                    flush_names,
+                    get_state(next_buf),
+                    w,
+                    rule.Id,
+                    max_arcs,
+                    arc_count,
                 )
                 if next_buf not in visited:
                     visited.add(next_buf)
@@ -459,6 +496,7 @@ def _compile_n_m0(
                     w,
                     rule.Id,
                     max_arcs,
+                    arc_count,
                 )
             else:
                 # Buffer full — check whether it models Inr
@@ -489,6 +527,7 @@ def _compile_n_m0(
                     w,
                     rule.Id,
                     max_arcs,
+                    arc_count,
                 )
 
             if next_buf not in visited:
