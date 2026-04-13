@@ -406,7 +406,6 @@ def _compile_n_m0(
 
     # Terminal boundary symbol: EOS for left-to-right, BOS for right-to-left.
     terminal_seg = fs.BOS if dir_r else fs.EOS
-    terminal_name = inv.name_of(terminal_seg)
 
     state_map: dict[tuple[str, ...], int] = {}
 
@@ -463,7 +462,7 @@ def _compile_n_m0(
                             visited.add(next_buf)
                             queue.append(next_buf)
                         continue
-                # No match (or buffer too short): flush all buffered + terminal.
+                # No match (or buffer too short): flush all buffered + terminal
                 flush_names = list(buf) + [x_name]
                 next_buf = ()
                 _emit_chain(
@@ -603,7 +602,7 @@ def transduce(
 
     # Wrap with BOS/EOS so the FST can match boundary-sensitive rules and so
     # that the terminal-flush arcs (which replace epsilon flush arcs) fire at
-    # the correct position.  BOS and EOS are stripped from the output afterward.
+    # the correct position.  BOS and EOS are stripped from the output afterward
     has_bos = sym.find(_BOS_NAME) != -1
     has_eos = sym.find(_EOS_NAME) != -1
     if has_bos and has_eos:

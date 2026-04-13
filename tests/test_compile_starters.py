@@ -87,7 +87,7 @@ def test_starter(starter_name: str) -> None:
         # Tokenize input
         inp_word = inv.tokenize(inp_str)
         assert not isinstance(inp_word, list), (
-            f"Ambiguous tokenization for {inp_str!r} in starter {starter_name!r}"
+            f"Ambiguous tokenization for {inp_str!r} in starter {starter_name!r}"  # noqa: E501
         )
 
         # Reference evaluator output
@@ -105,7 +105,7 @@ def test_starter(starter_name: str) -> None:
             f"[{starter_name}] {inp_str!r}: FST={fst_str!r}, ref={ref_str!r}"
         )
 
-        # Also check the evaluator agrees with the expected output from tests.csv
+        # Also check the evaluator agrees with the expected output from tests.csv # noqa: E501
         assert ref_str == expected_str, (
             f"[{starter_name}] {inp_str!r}: "
             f"evaluator={ref_str!r}, expected={expected_str!r}"

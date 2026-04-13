@@ -204,11 +204,24 @@ def validate_cmd(config_file: Path) -> None:
     default=False,
     help="Run test suite through compiled FSTs in the transducers/ directory.",
 )
-def eval_cmd(config_file: Path, word: str | None, use_fst: bool) -> None:
+@click.option(
+    "--format",
+    "fmt",
+    type=click.Choice(["txt", "latex"]),
+    default=None,
+    help="Show a derivation table (txt = PrettyTable, latex = LaTeX tabular).",
+)
+def eval_cmd(
+    config_file: Path,
+    word: str | None,
+    use_fst: bool,
+    fmt: str | None,
+) -> None:
     """Apply grammar rules to a word or run the full test suite.
 
-    With --fst, runs the test suite through the compiled FSTs in the
-    transducers/ directory rather than the reference evaluator.
+    With --fst, runs through compiled FSTs in the transducers/ directory.
+    With --format, shows a derivation table across all test cases (or a
+    single word if provided).
     """
     from snc2fst.alphabet import load_alphabet
     from snc2fst.dsl import parse
@@ -228,8 +241,9 @@ def eval_cmd(config_file: Path, word: str | None, use_fst: bool) -> None:
         raise click.Abort()
 
     # ------------------------------------------------------------------
-    # --fst mode: load compiled transducers and run test suite through them
+    # FST setup (shared by both --fst and --format --fst paths)
     # ------------------------------------------------------------------
+    fsts = None
     if use_fst:
         try:
             import pynini
@@ -240,8 +254,6 @@ def eval_cmd(config_file: Path, word: str | None, use_fst: bool) -> None:
                 err=True,
             )
             raise click.Abort()
-
-        from snc2fst.compiler import transduce
 
         transducers_dir = config_file.parent / "transducers"
         expected = len(config.rules)
@@ -258,8 +270,8 @@ def eval_cmd(config_file: Path, word: str | None, use_fst: bool) -> None:
         fst_files = sorted(transducers_dir.glob("*.fst"))
         if len(fst_files) != expected:
             click.echo(
-                f"[x] Expected {expected} compiled FST(s) in '{transducers_dir}' "
-                f"but found {len(fst_files)}. "
+                f"[x] Expected {expected} compiled FST(s) in "
+                f"'{transducers_dir}' but found {len(fst_files)}. "
                 f"Recompile the grammar:\n\n"
                 f"    snc compile {config_file}\n",
                 err=True,
@@ -268,14 +280,85 @@ def eval_cmd(config_file: Path, word: str | None, use_fst: bool) -> None:
 
         fsts = [pynini.Fst.read(str(p)) for p in fst_files]
 
+    # ------------------------------------------------------------------
+    # Helpers: apply one step at a time, collecting intermediates
+    # ------------------------------------------------------------------
+
+    def _tokenize(input_word: str):
+        tokenized = inv.tokenize(input_word)
+        if isinstance(tokenized, list):
+            raise click.ClickException(
+                f"Ambiguous tokenization for {input_word!r} — "
+                "use spaces to disambiguate."
+            )
+        return tokenized
+
+    def _apply_chain_steps(input_word: str) -> list[str]:
+        """Return [UR, after_R1, after_R2, ..., SR] as rendered strings."""
+        if use_fst:
+            from snc2fst.compiler import transduce
+
+            tokenized = _tokenize(input_word)
+            current_names = [inv.name_of(seg) for seg in tokenized]
+            steps = ["".join(current_names)]
+            assert fsts is not None
+            for rule, fst in zip(config.rules, fsts):
+                current_names = transduce(fst, rule, current_names)
+                steps.append("".join(current_names))
+        else:
+            tokenized = _tokenize(input_word)
+            current = tokenized
+            steps = [inv.render(current)]
+            for rule in config.rules:
+                out_ast = parse(rule.Out)
+                current = apply_rule(rule, out_ast, current, fs, inv)
+                steps.append(inv.render(current))
+        return steps
+
+    # ------------------------------------------------------------------
+    # --format mode: derivation table
+    # ------------------------------------------------------------------
+    if fmt is not None:
+        # Collect inputs: single word or all test cases
+        if word is not None:
+            inputs = [word]
+        else:
+            tests = load_tests(config_file.parent / config.tests_path)
+            inputs = [inp for inp, _ in tests]
+
+        # Build derivation matrix: rows = stages, cols = inputs
+        # stages[i] = [ur, after_r1, ..., sr]  for input i
+        all_steps: list[list[str]] = []
+        errors: list[str] = []
+        for inp in inputs:
+            try:
+                all_steps.append(_apply_chain_steps(inp))
+            except Exception as e:
+                errors.append(f"{inp}: {e}")
+                all_steps.append(["ERROR"] * (len(config.rules) + 1))
+
+        if errors:
+            for err in errors:
+                click.echo(f"  [x] {err}", err=True)
+
+        rule_ids = [rule.Id for rule in config.rules]
+
+        if fmt == "txt":
+            click.echo(_format_table_txt(inputs, all_steps, rule_ids))
+        else:
+            click.echo(_format_table_latex(inputs, all_steps, rule_ids))
+        return
+
+    # ------------------------------------------------------------------
+    # --fst mode (no --format): standard pass/fail output
+    # ------------------------------------------------------------------
+    if use_fst:
+        from snc2fst.compiler import transduce
+
         def apply_fst_chain(input_word: str) -> str:
-            tokenized = inv.tokenize(input_word)
-            if isinstance(tokenized, list):
-                raise click.ClickException(
-                    f"Ambiguous tokenization for {input_word!r} — "
-                    "use spaces to disambiguate."
-                )
+            tokenized = _tokenize(input_word)
             current = [inv.name_of(seg) for seg in tokenized]
+            assert fsts is not None
             for rule, fst in zip(config.rules, fsts):
                 current = transduce(fst, rule, current)
             return "".join(current)
@@ -309,13 +392,7 @@ def eval_cmd(config_file: Path, word: str | None, use_fst: bool) -> None:
         raise click.Abort()
 
     def apply_chain(input_word: str) -> str:
-        tokenized = inv.tokenize(input_word)
-        if isinstance(tokenized, list):
-            raise click.ClickException(
-                f"Ambiguous tokenization for {input_word!r} — "
-                "use spaces to disambiguate."
-            )
-        w = tokenized
+        w = _tokenize(input_word)
         for rule in config.rules:
             w = apply_rule(rule, out_asts[rule.Id], w, fs, inv)
         return inv.render(w)
@@ -346,6 +423,119 @@ def eval_cmd(config_file: Path, word: str | None, use_fst: bool) -> None:
             click.echo(f"  [ERROR] {inp}: {e}")
             failed += 1
     click.echo(f"\n{passed}/{passed + failed} passed")
+
+
+# ---------------------------------------------------------------------------
+# Table formatters
+# ---------------------------------------------------------------------------
+
+
+def _format_table_txt(
+    inputs: list[str],
+    all_steps: list[list[str]],
+    rule_ids: list[str],
+) -> str:
+    """
+    Render a derivation table as plain text with borders only around UR/SR.
+    """
+    rows: list[list[str]] = []
+
+    # UR row
+    rows.append(["UR"] + [f"/{all_steps[i][0]}/" for i in range(len(inputs))])
+
+    # One row per rule
+    for r_idx, rule_id in enumerate(rule_ids):
+        row = [rule_id]
+        for i in range(len(inputs)):
+            before = all_steps[i][r_idx]
+            after = all_steps[i][r_idx + 1]
+            row.append(f"[{after}]" if after != before else "---")
+        rows.append(row)
+
+    # SR row
+    rows.append(["SR"] + [f"[{all_steps[i][-1]}]" for i in range(len(inputs))])
+
+    # Compute column widths
+    ncols = 1 + len(inputs)
+    widths = [0] * ncols
+    for row in rows:
+        for j, cell in enumerate(row):
+            widths[j] = max(widths[j], len(cell))
+
+    def make_border() -> str:
+        return "+" + "+".join("-" * (w + 2) for w in widths) + "+"
+
+    def make_row(row: list[str]) -> str:
+        cells = [f" {cell.center(widths[j])} " for j, cell in enumerate(row)]
+        return "|" + "|".join(cells) + "|"
+
+    border = make_border()
+    lines: list[str] = []
+
+    # Top + UR
+    lines.append(border)
+    lines.append(make_row(rows[0]))
+    lines.append(border)
+
+    # Rule rows
+    for row in rows[1:-1]:
+        lines.append(make_row(row))
+
+    # SR + bottom
+    lines.append(border)
+    lines.append(make_row(rows[-1]))
+    lines.append(border)
+
+    return "\n".join(lines)
+
+
+def _format_table_latex(
+    inputs: list[str],
+    all_steps: list[list[str]],
+    rule_ids: list[str],
+) -> str:
+    """Render a derivation table as a LaTeX tabular environment."""
+    col_spec = "r" + "c" * len(inputs)
+
+    def _escape(s: str) -> str:
+        """Minimal LaTeX escaping for phonological strings."""
+        return s.replace("_", r"\_").replace("%", r"\%").replace("&", r"\&")
+
+    lines = [
+        "\\begin{tabular}{" + col_spec + "}",
+        "  \\hline",
+    ]
+
+    # UR row
+    ur_cells = ["\\textsc{ur}"] + [
+        f"/{_escape(all_steps[i][0])}/" for i in range(len(inputs))
+    ]
+    lines.append("  " + " & ".join(ur_cells) + " \\\\")
+    lines.append("  \\hline")
+
+    # Rule rows
+    for r_idx, rule_id in enumerate(rule_ids):
+        row_cells = [f"\\textsc{{{_escape(rule_id)}}}"]
+        for i in range(len(inputs)):
+            before = all_steps[i][r_idx]
+            after = all_steps[i][r_idx + 1]
+            if after != before:
+                row_cells.append(f"[{_escape(after)}]")
+            else:
+                row_cells.append("---")
+        lines.append("  " + " & ".join(row_cells) + " \\\\")
+
+    lines.append("  \\hline")
+
+    # SR row
+    sr_cells = ["\\textsc{sr}"] + [
+        f"[{_escape(all_steps[i][-1])}]" for i in range(len(inputs))
+    ]
+    lines.append("  " + " & ".join(sr_cells) + " \\\\")
+    lines.append("  \\hline")
+    lines.append("\\end{tabular}")
+
+    return "\n".join(lines)
 
 
 @main.command(name="compile")
