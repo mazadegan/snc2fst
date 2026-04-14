@@ -3,7 +3,7 @@
 ## Installation
 
 ```bash
-conda install mazadegan::snc2fst
+conda install -c conda-forge mazadegan::snc2fst
 ```
 
 ## Developer Notes
@@ -21,12 +21,16 @@ pip install -e .
 2. Build the conda package:
 
 ```bash
-conda build conda-recipe
-# or
-conda-build conda-recipe
+conda-build conda-recipe -c mazadegan -c conda-forge -c defaults
 ```
 
-3. Upload to anaconda channel:
+3. Test the local build before uploading:
+
+```bash
+conda install ~/miniforge3/envs/snc2fst/conda-bld/noarch/snc2fst-<version>-*.conda
+```
+
+4. Upload to anaconda channel:
 
 ```bash
 anaconda login

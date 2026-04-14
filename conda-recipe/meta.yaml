@@ -10,6 +10,7 @@ source:
 
 build:
   noarch: python
+  channel_sources: mazadegan,conda-forge,defaults
   script:
     - {{ PYTHON }} -m pip install . -vv
   entry_points:
