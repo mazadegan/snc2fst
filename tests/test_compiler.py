@@ -684,3 +684,13 @@ def test_boundary_eos_trigger_nasalizes_all_vowels():
             [],
         ],
     )
+
+
+def test_compiled_fst_symbol_tables_are_named(tmp_path) -> None:
+    fst = compile_rule(NASAL_L, _FS, _INV)
+    path = tmp_path / "assim_prev.fst"
+    fst.write(str(path))
+
+    reloaded = pynini.Fst.read(str(path))
+    assert reloaded.input_symbols().name() == "snc2fst_symbols"
+    assert reloaded.output_symbols().name() == "snc2fst_symbols"

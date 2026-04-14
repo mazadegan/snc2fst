@@ -179,6 +179,7 @@ def _build_sym_table(inv: lp.Inventory) -> pynini.SymbolTable:
     sequential positive integer labels.
     """
     sym = pynini.SymbolTable()
+    sym.set_name("snc2fst_symbols")
     sym.add_symbol("<eps>", 0)
     for name in inv.name_to_segment:
         sym.add_symbol(name)
