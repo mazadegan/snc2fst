@@ -1,5 +1,5 @@
 {% set name = "snc2fst" %}
-{% set version = "2.0.0" %}
+{% set version = "2.0.1" %}
 
 package:
   name: {{ name }}
@@ -10,7 +10,8 @@ source:
 
 build:
   noarch: python
-  script: {{ PYTHON }} -m pip install . -vv
+  script:
+    - {{ PYTHON }} -m pip install . -vv
   entry_points:
     - snc2fst = snc2fst.cli:main
     - snc = snc2fst.cli:main
@@ -32,9 +33,11 @@ requirements:
     - jinja2 >=3.0.0
     - python-multipart >=0.0.9
     - pynini
-    - logical-phonology >=0.2.9
+    - mazadegan::logical-phonology >=0.2.9
 
 test:
+  requires:
+    - pip
   imports:
     - snc2fst
   commands:
