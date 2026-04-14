@@ -1,5 +1,5 @@
 {% set name = "snc2fst" %}
-{% set version = "1.1.1" %}
+{% set version = "2.0.0" %}
 
 package:
   name: {{ name }}
@@ -32,6 +32,7 @@ requirements:
     - jinja2 >=3.0.0
     - python-multipart >=0.0.9
     - pynini
+    - logical-phonology >=0.2.9
 
 test:
   imports:

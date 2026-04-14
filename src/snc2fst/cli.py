@@ -13,6 +13,7 @@ STARTERS = [
 
 
 @click.group()
+@click.version_option(package_name="snc2fst")
 def main() -> None:
     """
     snc2fst: Compile Search-and-Change grammars to finite state transducers.
@@ -695,3 +696,51 @@ def _write_att(fst: pynini.Fst, path: Path) -> None:
                 lines.append(f"{state}\t{fw}")
 
     path.write_text("\n".join(lines) + "\n")
+
+
+@main.command(name="export")
+@click.argument(
+    "config_file", type=click.Path(exists=True, dir_okay=False, path_type=Path)
+)
+@click.option(
+    "--format",
+    "fmt",
+    type=click.Choice(["txt", "latex"]),
+    default="txt",
+    show_default=True,
+    help="Output format.",
+)
+@click.option(
+    "--output",
+    "-o",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Output file. Defaults to stdout.",
+)
+def export_cmd(config_file: Path, fmt: str, output: Path | None) -> None:
+    """Export a grammar to Unicode text or LaTeX format."""
+    from snc2fst.alphabet import load_alphabet
+    from snc2fst.export import export_latex, export_txt
+    from snc2fst.io import load_config
+
+    try:
+        config = load_config(config_file)
+    except Exception as e:
+        click.echo(f"[x] Failed to load config: {e}", err=True)
+        raise click.Abort()
+
+    try:
+        _, inv = load_alphabet(config_file.parent / config.alphabet_path)
+    except Exception as e:
+        click.echo(f"[x] Failed to load alphabet: {e}", err=True)
+        raise click.Abort()
+
+    result = (
+        export_txt(config, inv) if fmt == "txt" else export_latex(config, inv)
+    )
+
+    if output is None:
+        click.echo(result)
+    else:
+        output.write_text(result)
+        click.echo(f"[✓] Exported to '{output}'.")
