@@ -93,6 +93,29 @@ def _assert_agrees(rule: Rule, inputs: list[list[str]]) -> None:
         )
 
 
+def _assert_agrees_no_eps(
+    rule: Rule,
+    inputs: list[list[str]],
+) -> None:
+    """Compile rule in no-epsilon-input mode and compare with evaluator."""
+    fst = compile_rule(rule, _FS, _INV, no_epsilon_input_arcs=True)
+    for inp in inputs:
+        ref = _eval_ref(rule, inp)
+        got = transduce(fst, rule, inp)
+        assert got == ref, (
+            f"Mismatch on input {inp!r}: FST={got!r}, ref={ref!r}"
+        )
+
+
+def _count_eps_input_arcs(fst) -> int:
+    count = 0
+    for state in fst.states():
+        for arc in fst.arcs(state):
+            if arc.ilabel == 0:
+                count += 1
+    return count
+
+
 def _assert_agrees_bounded(rule: Rule, inputs: list[list[str]]) -> None:
     """
     Like _assert_agrees but brackets input with ⋉/⋊ for boundary-aware rules.
@@ -345,6 +368,44 @@ def test_epenthesis_with_context():
 
 def test_epenthesis_greedy():
     _assert_agrees(EPENTHESIS, [_segs("m m m")])
+
+
+def test_epenthesis_no_eps_input_mode_matches_evaluator():
+    _assert_agrees_no_eps(
+        EPENTHESIS,
+        [_segs("m n"), _segs("m b n"), _segs("m n n m"), _segs("m m m")],
+    )
+
+
+def test_epenthesis_no_eps_input_mode_has_no_eps_input_arcs():
+    fst = compile_rule(EPENTHESIS, _FS, _INV, no_epsilon_input_arcs=True)
+    assert _count_eps_input_arcs(fst) == 0
+
+
+def test_epenthesis_no_eps_input_mode_uses_readable_seq_labels():
+    fst = compile_rule(EPENTHESIS, _FS, _INV, no_epsilon_input_arcs=True)
+    sym = fst.output_symbols()
+    labels = [sym.find(i) for i in range(sym.num_symbols())]
+    map_labels = [lbl for lbl in labels if lbl.startswith("__SEQMAP__:")]
+    assert map_labels
+    mapped_lhs: set[str] = set()
+    for lbl in map_labels:
+        payload = lbl[len("__SEQMAP__:") :]
+        lhs, _sep, _rhs = payload.partition("=")
+        mapped_lhs.add(lhs)
+
+    seq_labels_used: set[str] = set()
+    for state in fst.states():
+        for arc in fst.arcs(state):
+            if arc.olabel == 0:
+                continue
+            name = sym.find(arc.olabel)
+            if name in mapped_lhs:
+                seq_labels_used.add(name)
+
+    assert seq_labels_used
+    assert all("__SEQ__" not in lbl for lbl in seq_labels_used)
+    assert all(ch not in lbl for lbl in seq_labels_used for ch in ":[]|")
 
 
 # ---------------------------------------------------------------------------

@@ -208,9 +208,9 @@ def validate_cmd(config_file: Path) -> None:
 @click.option(
     "--format",
     "fmt",
-    type=click.Choice(["txt", "latex"]),
+    type=click.Choice(["txt", "latex", "json"]),
     default=None,
-    help="Show a derivation table (txt = PrettyTable, latex = LaTeX tabular).",
+    help="Show a derivation table (txt = PrettyTable, latex = LaTeX tabular, json = machine-readable test results).",
 )
 def eval_cmd(
     config_file: Path,
@@ -320,12 +320,14 @@ def eval_cmd(
     # --format mode: derivation table
     # ------------------------------------------------------------------
     if fmt is not None:
-        # Collect inputs: single word or all test cases
+        # Collect inputs (and expected outputs for json)
         if word is not None:
             inputs = [word]
+            expected_outputs: list[str | None] = [None]
         else:
             tests = load_tests(config_file.parent / config.tests_path)
             inputs = [inp for inp, _ in tests]
+            expected_outputs = [exp for _, exp in tests]
 
         # Build derivation matrix: rows = stages, cols = inputs
         # stages[i] = [ur, after_r1, ..., sr]  for input i
@@ -338,7 +340,7 @@ def eval_cmd(
                 errors.append(f"{inp}: {e}")
                 all_steps.append(["ERROR"] * (len(config.rules) + 1))
 
-        if errors:
+        if errors and fmt != "json":
             for err in errors:
                 click.echo(f"  [x] {err}", err=True)
 
@@ -346,8 +348,11 @@ def eval_cmd(
 
         if fmt == "txt":
             click.echo(_format_table_txt(inputs, all_steps, rule_ids))
-        else:
+        elif fmt == "latex":
             click.echo(_format_table_latex(inputs, all_steps, rule_ids))
+        else:
+            import json
+            click.echo(json.dumps(_format_json(inputs, all_steps, rule_ids, expected_outputs), ensure_ascii=False, indent=2))
         return
 
     # ------------------------------------------------------------------
@@ -429,6 +434,35 @@ def eval_cmd(
 # ---------------------------------------------------------------------------
 # Table formatters
 # ---------------------------------------------------------------------------
+
+
+def _format_json(
+    inputs: list[str],
+    all_steps: list[list[str]],
+    rule_ids: list[str],
+    expected_outputs: list[str | None],
+) -> dict:
+    cases = []
+    passed = 0
+    for i, (inp, steps) in enumerate(zip(inputs, all_steps)):
+        exp = expected_outputs[i] if i < len(expected_outputs) else None
+        actual = steps[-1]
+        ok = (actual == exp) if exp is not None else None
+        if ok:
+            passed += 1
+        cases.append({
+            "input": inp,
+            "expected": exp,
+            "actual": actual,
+            "passed": ok,
+            "rule_trace": [
+                {"rule": rid, "output": steps[j + 1]}
+                for j, rid in enumerate(rule_ids)
+            ],
+        })
+    total = len(inputs)
+    result: dict = {"passed": passed, "total": total, "cases": cases}
+    return result
 
 
 def _format_table_txt(
@@ -556,7 +590,21 @@ def _format_table_latex(
     type=int,
     help="Abort compilation of a rule if its FST exceeds this many arcs.",
 )
-def compile_cmd(config_file: Path, att: bool, max_arcs: int) -> None:
+@click.option(
+    "--no-epsilon-input-arcs",
+    is_flag=True,
+    default=False,
+    help=(
+        "Encode multi-symbol outputs as macro symbols on consuming arcs to "
+        "avoid epsilon-input chains."
+    ),
+)
+def compile_cmd(
+    config_file: Path,
+    att: bool,
+    max_arcs: int,
+    no_epsilon_input_arcs: bool,
+) -> None:
     """Compile grammar rules to OpenFST transducers.
 
     Writes one .fst file per rule into a 'transducers/' directory at the
@@ -616,7 +664,13 @@ def compile_cmd(config_file: Path, att: bool, max_arcs: int) -> None:
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
             try:
-                fst = compile_rule(rule, fs, rule_inv, max_arcs=max_arcs)
+                fst = compile_rule(
+                    rule,
+                    fs,
+                    rule_inv,
+                    max_arcs=max_arcs,
+                    no_epsilon_input_arcs=no_epsilon_input_arcs,
+                )
             except CompileError as e:
                 click.echo(f"  [x] Rule '{rule.Id}': {e}", err=True)
                 raise click.Abort()
@@ -657,7 +711,7 @@ def _write_att(fst: pynini.Fst, path: Path) -> None:
     Final states:
       state_id  [weight]
 
-    Label 0 is rendered as <eps>.
+    Label 0 is rendered as 0.
     """
     import pynini
 
@@ -666,7 +720,7 @@ def _write_att(fst: pynini.Fst, path: Path) -> None:
 
     def label_str(sym_table: pynini.SymbolTable, label: int) -> str:  # type: ignore[name-defined]
         if label == 0:
-            return "<eps>"
+            return "0"
         name = sym_table.find(label)
         return name if name else str(label)
 

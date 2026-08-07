@@ -165,6 +165,10 @@ def compute_alphabets(
 # ---------------------------------------------------------------------------
 
 _DEFAULT_MAX_ARCS = 1_000_000
+_SEQ_MAP_PREFIX = "__SEQMAP__:"
+_SEQ_META_SEP = "|"
+_SEQ_META_EQ = "="
+_SEQ_META_ESC = "\\"
 
 
 # ---------------------------------------------------------------------------
@@ -202,6 +206,7 @@ def _emit_chain(
     rule_id: str,
     max_arcs: int,
     arc_count: list[int],
+    collapse_multisymbol_output: bool = False,
 ) -> None:
     """Add arcs from src consuming ilabel and emitting out_names, ending at dst.
 
@@ -222,6 +227,15 @@ def _emit_chain(
 
     if not out_names:
         _add(src, pynini.Arc(ilabel, 0, w, dst))
+        return
+
+    if collapse_multisymbol_output and len(out_names) > 1:
+        seq_sym = _encode_sequence_symbol(out_names)
+        _register_sequence_mapping(sym, seq_sym, out_names)
+        olabel = sym.find(seq_sym)
+        if olabel == -1:
+            olabel = sym.add_symbol(seq_sym)
+        _add(src, pynini.Arc(ilabel, olabel, w, dst))
         return
 
     nodes = (
@@ -274,6 +288,7 @@ def _compile_n1_m1(
     fs: lp.FeatureSystem,
     inv: lp.Inventory,
     max_arcs: int,
+    collapse_multisymbol_output: bool = False,
 ) -> pynini.Fst:
     """Build the S&C FST for the n=1, m=1 case.
 
@@ -327,6 +342,7 @@ def _compile_n1_m1(
             rule.Id,
             max_arcs,
             arc_count,
+            collapse_multisymbol_output,
         )
 
     # Transitions from each trigger state q_σ
@@ -354,6 +370,7 @@ def _compile_n1_m1(
                 rule.Id,
                 max_arcs,
                 arc_count,
+                collapse_multisymbol_output,
             )
 
     fst.set_input_symbols(sym)
@@ -372,6 +389,7 @@ def _compile_n_m0(
     fs: lp.FeatureSystem,
     inv: lp.Inventory,
     max_arcs: int,
+    collapse_multisymbol_output: bool = False,
 ) -> pynini.Fst:
     """Build the S&C FST for the n≥1, m=0 case using a sliding buffer.
 
@@ -458,6 +476,7 @@ def _compile_n_m0(
                             rule.Id,
                             max_arcs,
                             arc_count,
+                            collapse_multisymbol_output,
                         )
                         if next_buf not in visited:
                             visited.add(next_buf)
@@ -477,6 +496,7 @@ def _compile_n_m0(
                     rule.Id,
                     max_arcs,
                     arc_count,
+                    collapse_multisymbol_output,
                 )
                 if next_buf not in visited:
                     visited.add(next_buf)
@@ -497,6 +517,7 @@ def _compile_n_m0(
                     rule.Id,
                     max_arcs,
                     arc_count,
+                    collapse_multisymbol_output,
                 )
             else:
                 # Buffer full — check whether it models Inr
@@ -528,6 +549,7 @@ def _compile_n_m0(
                     rule.Id,
                     max_arcs,
                     arc_count,
+                    collapse_multisymbol_output,
                 )
 
             if next_buf not in visited:
@@ -563,6 +585,7 @@ def compile_rule(
     fs: lp.FeatureSystem,
     inv: lp.Inventory,
     max_arcs: int = _DEFAULT_MAX_ARCS,
+    no_epsilon_input_arcs: bool = False,
 ) -> pynini.Fst:
     """Compile an S&C rule to a pynini FST transducer.
 
@@ -578,6 +601,9 @@ def compile_rule(
                   (i.e. the output of ``compute_alphabets``).
         max_arcs: Soft arc-count limit; raises CompileError if exceeded during
                   construction. Defaults to 1,000,000.
+        no_epsilon_input_arcs: If True, multi-segment outputs are encoded as
+                  single "sequence symbols" on consuming arcs, avoiding
+                  epsilon-input output chains.
 
     Returns:
         A compiled pynini.Fst transducer.
@@ -588,8 +614,102 @@ def compile_rule(
     _check_compilable(rule)
     out_ast = dsl.parse(rule.Out)
     if len(rule.Trm) == 0:
-        return _compile_n_m0(rule, out_ast, fs, inv, max_arcs)
-    return _compile_n1_m1(rule, out_ast, fs, inv, max_arcs)
+        return _compile_n_m0(
+            rule,
+            out_ast,
+            fs,
+            inv,
+            max_arcs,
+            collapse_multisymbol_output=no_epsilon_input_arcs,
+        )
+    return _compile_n1_m1(
+        rule,
+        out_ast,
+        fs,
+        inv,
+        max_arcs,
+        collapse_multisymbol_output=no_epsilon_input_arcs,
+    )
+
+
+def _encode_sequence_symbol(names: list[str]) -> str:
+    return "".join(names)
+
+
+def _esc_meta(s: str) -> str:
+    s = s.replace(_SEQ_META_ESC, _SEQ_META_ESC + _SEQ_META_ESC)
+    s = s.replace(_SEQ_META_SEP, _SEQ_META_ESC + _SEQ_META_SEP)
+    s = s.replace(_SEQ_META_EQ, _SEQ_META_ESC + _SEQ_META_EQ)
+    return s
+
+
+def _unesc_meta(s: str) -> str:
+    out: list[str] = []
+    esc = False
+    for ch in s:
+        if esc:
+            out.append(ch)
+            esc = False
+            continue
+        if ch == _SEQ_META_ESC:
+            esc = True
+            continue
+        out.append(ch)
+    if esc:
+        out.append(_SEQ_META_ESC)
+    return "".join(out)
+
+
+def _split_escaped(s: str, sep: str) -> list[str]:
+    parts: list[str] = []
+    cur: list[str] = []
+    esc = False
+    for ch in s:
+        if esc:
+            cur.append(ch)
+            esc = False
+            continue
+        if ch == _SEQ_META_ESC:
+            esc = True
+            continue
+        if ch == sep:
+            parts.append("".join(cur))
+            cur = []
+            continue
+        cur.append(ch)
+    if esc:
+        cur.append(_SEQ_META_ESC)
+    parts.append("".join(cur))
+    return parts
+
+
+def _register_sequence_mapping(
+    sym: pynini.SymbolTable,
+    seq_sym: str,
+    names: list[str],
+) -> None:
+    lhs = _esc_meta(seq_sym)
+    rhs = _SEQ_META_SEP.join(_esc_meta(name) for name in names)
+    map_sym = f"{_SEQ_MAP_PREFIX}{lhs}{_SEQ_META_EQ}{rhs}"
+    if sym.find(map_sym) == -1:
+        sym.add_symbol(map_sym)
+
+
+def _sequence_symbol_map(sym: pynini.SymbolTable) -> dict[str, list[str]]:
+    out: dict[str, list[str]] = {}
+    for i in range(sym.num_symbols()):
+        label = sym.find(i)
+        if not label.startswith(_SEQ_MAP_PREFIX):
+            continue
+        payload = label[len(_SEQ_MAP_PREFIX) :]
+        parts = _split_escaped(payload, _SEQ_META_EQ)
+        if len(parts) < 2:
+            continue
+        lhs = _unesc_meta(parts[0])
+        rhs_joined = _SEQ_META_EQ.join(parts[1:])
+        rhs = [_unesc_meta(x) for x in _split_escaped(rhs_joined, _SEQ_META_SEP)]
+        out[lhs] = rhs
+    return out
 
 
 def transduce(
@@ -635,6 +755,7 @@ def transduce(
     # multi-symbol output chains (_emit_chain), dropping inserted segments.
     shortest = pynini.shortestpath(composed)
     shortest.rmepsilon()
+    seq_map = _sequence_symbol_map(out_sym)
 
     result: list[str] = []
     state = shortest.start()
@@ -646,7 +767,8 @@ def transduce(
             break
         arc = arcs[0]
         if arc.olabel != 0:
-            result.append(out_sym.find(arc.olabel))
+            name = out_sym.find(arc.olabel)
+            result.extend(seq_map.get(name, [name]))
         state = arc.nextstate
 
     if rule.Dir == "R":
