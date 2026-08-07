@@ -1,8 +1,94 @@
+from collections import deque
+from collections.abc import Iterable, Sequence
+from dataclasses import dataclass, field
+
 import logical_phonology as lp
 
 from snc2fst import dsl_ast as ast
 from snc2fst.errors import EvalError
 from snc2fst.models import Rule
+from snc2fst.wellformed import check_wellformed
+
+# ---------------------------------------------------------------------------
+# Direction-parameterized scanning primitives
+# ---------------------------------------------------------------------------
+#
+# Evaluation scans the word *against* Dir: right-to-left for Dir=R, left-to-
+# right for Dir=L.  Rather than reversing the word onto a single machine — a
+# normalization that is unsound, since a Trm-window is anchored at its left
+# end under both directions — we keep buffers in word order throughout and let
+# Dir choose only which end is "new" and which is "stale".
+#
+#                     Dir = R              Dir = L
+#   scan order        i = l-1 ... 0        i = 0 ... l-1
+#   push(C, a)        a . C                C . a
+#   stale(C)          last(C)              first(C)
+#   drop_stale(C)     init(C)              tail(C)
+#   emit(O, c)        prepend c to O       append c to O
+
+
+@dataclass
+class _Ring:
+    """A bounded buffer of already-scanned segments, held in word order.
+
+    ``right`` is True for Dir=R.  The "stale" end is the one holding the
+    earliest-scanned segment, which — because the scan runs against Dir — is
+    always the Dir-side end.
+    """
+
+    right: bool
+    items: deque[lp.Segment] = field(default_factory=deque)
+
+    def push(self, seg: lp.Segment) -> None:
+        if self.right:
+            self.items.appendleft(seg)
+        else:
+            self.items.append(seg)
+
+    def stale(self) -> lp.Segment:
+        return self.items[-1] if self.right else self.items[0]
+
+    def drop_stale(self) -> None:
+        if self.right:
+            self.items.pop()
+        else:
+            self.items.popleft()
+
+    def clear(self) -> None:
+        self.items.clear()
+
+    def word(self, fs: lp.FeatureSystem) -> lp.Word:
+        return fs.word(list(self.items))
+
+    def __len__(self) -> int:
+        return len(self.items)
+
+
+class _Sink:
+    """Output accumulator: emissions land at the anti-scan end.
+
+    Because the scan runs against Dir, each newly emitted chunk belongs
+    further along in word order than everything emitted so far, so emissions
+    concatenate in increasing position order.
+    """
+
+    def __init__(self, right: bool) -> None:
+        self.right = right
+        self.items: deque[lp.Segment] = deque()
+
+    def emit(self, segs: Sequence[lp.Segment]) -> None:
+        if self.right:
+            self.items.extendleft(reversed(segs))
+        else:
+            self.items.extend(segs)
+
+    def word(self, fs: lp.FeatureSystem) -> lp.Word:
+        return fs.word(list(self.items))
+
+
+def _scan_order(length: int, right: bool) -> Iterable[int]:
+    """Indices in scan order — against Dir."""
+    return range(length - 1, -1, -1) if right else range(length)
 
 
 def _as_segment(val: lp.Word | lp.Segment | bool, op_name: str) -> lp.Segment:
@@ -155,38 +241,6 @@ def evaluate(
             raise EvalError(f"Cannot evaluate node: {node!r}")
 
 
-def _find_trigger(
-    word: lp.Word,
-    trm: lp.NaturalClassSequence,
-    anchor: int,
-    rightward: bool,
-) -> lp.Word | None:
-    """Find the nearest match of trm in word relative to anchor.
-
-    Searches rightward from anchor (inclusive) toward the end of the word,
-    or leftward (exclusive) toward the beginning, returning the first
-    matching window found.
-
-    Args:
-        word: The word to search.
-        trm: The natural class sequence to match against.
-        anchor: The position in word to search from.
-        rightward: If True, search right from anchor; if False, search left.
-
-    Returns:
-        The first matching substring of word as an lp.Word, or None if no
-        match is found or trm is empty.
-    """
-    n = len(trm)
-    if n == 0:
-        return None
-    if rightward:
-        start = trm.find_first(word, from_pos=anchor)
-    else:
-        start = trm.find_last(word, before_pos=anchor)
-    return word[start : start + n] if start is not None else None
-
-
 def _check_boundary_positions(
     word: lp.Word, rule_id: str, fs: lp.FeatureSystem
 ) -> None:
@@ -218,49 +272,131 @@ def _check_boundary_positions(
         )
 
 
+def _eval_out(
+    rule: Rule,
+    out_ast: ast.Expr,
+    target: lp.Word,
+    trigger: lp.Word,
+    fs: lp.FeatureSystem,
+    inv: lp.Inventory,
+) -> list[lp.Segment]:
+    """Evaluate Out on a matched (INR, TRM) pair, as a list of segments."""
+    try:
+        raw = evaluate(out_ast, target, trigger, fs, inv)
+    except EvalError as e:
+        raise EvalError(f"Rule '{rule.Id}': {e}") from e
+    if isinstance(raw, bool):
+        raise EvalError(
+            f"Rule '{rule.Id}': Out expression evaluated to a boolean"
+        )
+    return list(raw)
+
+
+def eval_cnd(
+    rule: Rule,
+    cnd_ast: ast.Expr | None,
+    target: lp.Word,
+    trigger: lp.Word,
+    fs: lp.FeatureSystem,
+    inv: lp.Inventory,
+) -> bool:
+    """Evaluate a rule's licensing condition on a matched (INR, TRM) pair.
+
+    A rule with no Cnd licenses every INR-match, so this returns True.
+    """
+    if cnd_ast is None:
+        return True
+    try:
+        raw = evaluate(cnd_ast, target, trigger, fs, inv)
+    except EvalError as e:
+        raise EvalError(f"Rule '{rule.Id}': {e}") from e
+    if not isinstance(raw, bool):
+        raise EvalError(
+            f"Rule '{rule.Id}': Cnd expression did not evaluate to a "
+            "boolean. Use a condition such as (in? TRM [{+F}])."
+        )
+    return raw
+
+
 def apply_rule(
     rule: Rule,
     out_ast: ast.Expr,
     word: lp.Word,
     fs: lp.FeatureSystem,
     inv: lp.Inventory,
+    cnd_ast: ast.Expr | None = None,
 ) -> lp.Word:
     """Apply a single S&C rule to a word, returning the transformed word.
-    The word is bracketed with BOS/EOS pseudo-segments before processing and
-    stripped after. Scans left-to-right for non-overlapping target windows
-    (INR). For each target, searches in direction Dir for the nearest window
-    that models TRM (which may be non-adjacent). When found, OUT is evaluated
-    and the target is replaced.
+
+    A deterministic single pass over the word, run *against* ``Dir``, keeping
+    three pieces of bounded state:
+
+    * ``B`` — a buffer of the last ``m`` scanned segments, the candidate
+      INR-window.  On a match the rule fires and ``B`` is cleared, so the
+      window is consumed whole; otherwise its stale segment is emitted and
+      ``B`` slides by one.  That reset is the whole of the overlap policy:
+      among licensed windows that overlap each other, the Dir-most fires.
+    * ``T`` — the same for the candidate TRM-window.  Unlike ``B`` it never
+      resets on a match, since a terminator is not consumed.
+    * ``p`` — the *content* of the nearest TRM-window found so far, or None
+      for "no terminator yet".  Every TRM-match overwrites it, which is what
+      makes a terminator block rather than be skipped past.
+
+    ``p`` is read at the firing test *before* the current segment is latched
+    into it, which is what stops a position from licensing itself.
+
+    ``cnd_ast``, if given, is the rule's licensing condition: an INR-match
+    whose condition is false slides rather than firing, so its segments stay
+    available to a later overlapping window.
+
+    The word is bracketed with BOS/EOS pseudo-segments before scanning and
+    stripped after, so rules may condition on word edges.
     """
+    check_wellformed(rule, EvalError)
+
     inr_ncs = rule.inr_as_ncs(fs)
     trm_ncs = rule.trm_as_ncs(fs)
-    m = len(inr_ncs)
-    result = fs.add_boundaries(word)
-    i = 0
-    while i <= len(result) - m:
-        if not inr_ncs.matches_at(result, i):
-            i += 1
-            continue
-        target = result[i : i + m]
-        if len(trm_ncs) == 0:
-            trigger: lp.Word | None = fs.word([])
-        elif rule.Dir == "R":
-            trigger = _find_trigger(result, trm_ncs, i + m, rightward=True)
-        else:
-            trigger = _find_trigger(result, trm_ncs, i, rightward=False)
-        if trigger is None:
-            i += 1
-            continue
-        try:
-            raw = evaluate(out_ast, target, trigger, fs, inv)
-        except EvalError as e:
-            raise EvalError(f"Rule '{rule.Id}': {e}") from e
-        if isinstance(raw, bool):
-            raise EvalError(
-                f"Rule '{rule.Id}': Out expression evaluated to a boolean"
-            )
-        out = raw
-        result = result[:i] + out + result[i + m :]
-        i += len(out)
+    m, n = len(inr_ncs), len(trm_ncs)
+
+    scanned = fs.add_boundaries(word)
+    right = rule.Dir == "R"
+    target_buf, trigger_buf = _Ring(right), _Ring(right)
+    out = _Sink(right)
+    # With no TRM to find, every position is trivially licensed by the empty
+    # window — which is also what Out receives as its TRM argument.
+    pointer: lp.Word | None = fs.word([]) if n == 0 else None
+
+    for i in _scan_order(len(scanned), right):
+        seg = scanned[i]
+
+        target_buf.push(seg)
+        if len(target_buf) == m:
+            target = target_buf.word(fs)
+            if (
+                pointer is not None
+                and target in inr_ncs
+                and eval_cnd(rule, cnd_ast, target, pointer, fs, inv)
+            ):
+                out.emit(
+                    _eval_out(rule, out_ast, target, pointer, fs, inv)
+                )
+                target_buf.clear()  # fire: consume the whole window
+            else:
+                out.emit([target_buf.stale()])
+                target_buf.drop_stale()  # slide by one
+
+        # Latch strictly after resolving the target buffer, so the pointer
+        # read above cannot already include a TRM-window starting here.
+        if n:
+            trigger_buf.push(seg)
+            if len(trigger_buf) == n:
+                candidate = trigger_buf.word(fs)
+                if candidate in trm_ncs:
+                    pointer = candidate
+                trigger_buf.drop_stale()
+
+    out.emit(list(target_buf.items))  # flush the residual, len < m
+
+    result = out.word(fs)
     _check_boundary_positions(result, rule.Id, fs)
     return fs.remove_boundaries(result)

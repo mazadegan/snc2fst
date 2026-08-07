@@ -134,11 +134,15 @@ def _nc_seq_latex(nc_seq: list[list[tuple[str, str]]]) -> str:
     return "\\langle " + ", ".join(parts) + " \\rangle"
 
 
-def _rule_txt(rule: Rule, out_ast: ast.Expr) -> str:
+def _rule_txt(
+    rule: Rule, out_ast: ast.Expr, cnd_ast: ast.Expr | None = None
+) -> str:
     lines = [f"Rule {rule.Id}"]
     lines.append(f"  Dir: {rule.Dir}")
     lines.append(f"  Inr: {_nc_seq_txt(rule.Inr)}")
     lines.append(f"  Trm: {_nc_seq_txt(rule.Trm)}")
+    if cnd_ast is not None:
+        lines.append(f"  Cnd: {_expr_txt(cnd_ast)}")
     out_rendered = _expr_txt(out_ast)
     if "\n" in out_rendered:
         out_indented = "\n".join(
@@ -150,7 +154,9 @@ def _rule_txt(rule: Rule, out_ast: ast.Expr) -> str:
     return "\n".join(lines)
 
 
-def _rule_latex(rule: Rule, out_ast: ast.Expr) -> str:
+def _rule_latex(
+    rule: Rule, out_ast: ast.Expr, cnd_ast: ast.Expr | None = None
+) -> str:
     dir_str = "\\textsc{Right}" if rule.Dir == "R" else "\\textsc{Left}"
     inr_str = _nc_seq_latex(rule.Inr)
     trm_str = _nc_seq_latex(rule.Trm)
@@ -161,6 +167,14 @@ def _rule_latex(rule: Rule, out_ast: ast.Expr) -> str:
         f"  \\textsc{{Inr}} &= {inr_str} \\\\",
         f"  \\textsc{{Trm}} &= {trm_str} \\\\",
         f"  \\textsc{{Dir}} &= {dir_str} \\\\",
+    ]
+    if cnd_ast is not None:
+        cnd_str = _expr_latex(cnd_ast, depth=0)
+        lines.append(
+            f"  \\textsc{{Cnd}} &= \\lambda\\iota.\\,\\lambda\\tau.\\, "
+            f"{cnd_str} \\\\"
+        )
+    lines += [
         f"  \\textsc{{Out}} &= \\lambda\\iota.\\,\\lambda\\tau.\\, {out_str}",
         "\\end{align*}",
     ]
@@ -223,7 +237,13 @@ def export_txt(config: GrammarConfig, inv: lp.Inventory) -> str:
     sections = ["=== Alphabet ===", "", _alphabet_txt(inv)]
     for rule in config.rules:
         out_ast = dsl.parse(rule.Out)
-        sections += ["", f"=== {rule.Id} ===", "", _rule_txt(rule, out_ast)]
+        cnd_ast = dsl.parse(rule.Cnd) if rule.Cnd is not None else None
+        sections += [
+            "",
+            f"=== {rule.Id} ===",
+            "",
+            _rule_txt(rule, out_ast, cnd_ast),
+        ]
     return "\n".join(sections)
 
 
@@ -240,5 +260,6 @@ def export_latex(config: GrammarConfig, inv: lp.Inventory) -> str:
     sections = [_LATEX_PREAMBLE, "", _alphabet_latex(inv)]
     for rule in config.rules:
         out_ast = dsl.parse(rule.Out)
-        sections += ["", _rule_latex(rule, out_ast)]
+        cnd_ast = dsl.parse(rule.Cnd) if rule.Cnd is not None else None
+        sections += ["", _rule_latex(rule, out_ast, cnd_ast)]
     return "\n".join(sections)

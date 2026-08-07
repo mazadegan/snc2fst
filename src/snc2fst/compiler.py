@@ -1,8 +1,8 @@
 """FST compiler for S&C rules (pynini backend).
 
 Supported cases:
-  n=1, m=1  — trigger-conditioned rewrite (assimilation, vowel harmony, ...)
-  n≥1, m=0  — unconditional rewrite (epenthesis, metathesis, ...)
+  m=1, n=1  — trigger-conditioned rewrite (assimilation, vowel harmony, ...)
+  m≥1, n=0  — unconditional rewrite (epenthesis, metathesis, ...)
 
 For Dir=R, the same left-to-right FST is built and then used with reversed
 input/output, which correctly implements w → reverse(T(reverse(w))).
@@ -31,8 +31,9 @@ import pynini  # type: ignore[import]
 from snc2fst import dsl
 from snc2fst import dsl_ast as ast
 from snc2fst.errors import CompileError
-from snc2fst.evaluator import evaluate
+from snc2fst.evaluator import eval_cnd, evaluate
 from snc2fst.models import Rule
+from snc2fst.wellformed import check_wellformed
 
 # ---------------------------------------------------------------------------
 # Compilability check
@@ -40,18 +41,19 @@ from snc2fst.models import Rule
 
 
 def _check_compilable(rule: Rule) -> None:
-    n, m = len(rule.Inr), len(rule.Trm)
+    """Reject rule shapes this backend cannot yet build an FST for.
+
+    Assumes ``rule`` is already known to be well-formed (``m >= 1`` and
+    non-overlapping); ``compile_rule`` checks that first.
+    """
+    m, n = len(rule.Inr), len(rule.Trm)
     if n == 0:
-        raise CompileError(
-            f"Rule '{rule.Id}': Inr is empty (n=0); not supported."
-        )
-    if m == 0:
-        return  # n≥1, m=0: supported
-    if n == 1 and m == 1:
-        return  # n=1, m=1: supported
+        return  # m≥1, n=0: supported
+    if m == 1 and n == 1:
+        return  # m=1, n=1: supported
     raise CompileError(
-        f"Rule '{rule.Id}': (n={n}, m={m}) is not compilable. "
-        "Only (n≥1, m=0) and (n=1, m=1) are supported."
+        f"Rule '{rule.Id}': (m={m}, n={n}) is not compilable. "
+        "Only (m≥1, n=0) and (m=1, n=1) are supported."
     )
 
 
@@ -70,13 +72,18 @@ def _rule_output_segments(
     out_ast: ast.Expr,
     fs: lp.FeatureSystem,
     inv: lp.Inventory,
+    cnd_ast: ast.Expr | None = None,
 ) -> list[lp.Segment]:
     """Enumerate every distinct segment that Out can produce for this rule.
 
-    For n=1, m=1: evaluates Out over all (inr_seg, trm_seg) pairs where
+    For m=1, n=1: evaluates Out over all (inr_seg, trm_seg) pairs where
     inr_seg ∈ L(Inr) and trm_seg ∈ L(Trm).
 
-    For n≥1, m=0: evaluates Out over all inr_word ∈ L(Inr) (no trigger).
+    For m≥1, n=0: evaluates Out over all inr_word ∈ L(Inr) (no trigger).
+
+    Pairs the rule's licensing condition rejects are skipped: Out is never
+    evaluated on them at run time, so segments only reachable that way must
+    not be added to the alphabet.
 
     BOS/EOS are included in the enumeration because rules may legitimately
     condition on boundaries, but boundary pseudo-segments are never added to
@@ -86,20 +93,27 @@ def _rule_output_segments(
     produced: list[lp.Segment] = []
 
     if len(rule.Trm) == 0:
-        # n≥1, m=0 — iterate over all words in L(Inr)
+        # m≥1, n=0 — iterate over all words in L(Inr)
         # filter_boundaries=False so boundary-conditioned rules work
         for inr_word in inr_ncs.over(inv, filter_boundaries=False):
             if rule.Dir == "R":
                 inr_word = fs.word(list(reversed(list(inr_word))))
-            raw = evaluate(out_ast, inr_word, fs.word([]), fs, inv)
+            empty = fs.word([])
+            if not eval_cnd(rule, cnd_ast, inr_word, empty, fs, inv):
+                continue
+            raw = evaluate(out_ast, inr_word, empty, fs, inv)
             if isinstance(raw, lp.Word):
                 produced.extend(list(raw))  # type: ignore[arg-type]
             # bool case (shouldn't happen during alphabet propagation) is silently ignored # noqa: E501
     else:
-        # n=1, m=1 — iterate over all (inr, trm) pairs
+        # m=1, n=1 — iterate over all (inr, trm) pairs
         trm_ncs = rule.trm_as_ncs(fs)
         for inr_word in inr_ncs.over(inv, filter_boundaries=False):
             for trm_word in trm_ncs.over(inv, filter_boundaries=False):
+                if not eval_cnd(
+                    rule, cnd_ast, inr_word, trm_word, fs, inv
+                ):
+                    continue
                 raw = evaluate(out_ast, inr_word, trm_word, fs, inv)
                 if isinstance(raw, lp.Word):
                     produced.extend(list(raw))  # type: ignore[arg-type]
@@ -155,7 +169,10 @@ def compute_alphabets(
     for rule in rules:
         alphabets.append(current)
         out_ast = dsl.parse(rule.Out)
-        new_segs = _rule_output_segments(rule, out_ast, fs, current)
+        cnd_ast = dsl.parse(rule.Cnd) if rule.Cnd is not None else None
+        new_segs = _rule_output_segments(
+            rule, out_ast, fs, current, cnd_ast
+        )
         current = _extend_inventory(current, new_segs, rule.Id)
     return alphabets
 
@@ -278,19 +295,20 @@ def _out_names_for(
 
 
 # ---------------------------------------------------------------------------
-# Case 1: n=1, m=1  (trigger-conditioned rewrite)
+# Case 1: m=1, n=1  (trigger-conditioned rewrite)
 # ---------------------------------------------------------------------------
 
 
-def _compile_n1_m1(
+def _compile_m1_n1(
     rule: Rule,
     out_ast,
     fs: lp.FeatureSystem,
     inv: lp.Inventory,
     max_arcs: int,
     collapse_multisymbol_output: bool = False,
+    cnd_ast=None,
 ) -> pynini.Fst:
-    """Build the S&C FST for the n=1, m=1 case.
+    """Build the S&C FST for the m=1, n=1 case.
 
     States:
       q_f  — the "free" state (no pending trigger seen)
@@ -351,10 +369,17 @@ def _compile_n1_m1(
         for x_seg in all_segs:
             xl = sym.find(inv.name_of(x_seg))
             x_word = fs.word([x_seg])
-            if x_word in inr_ncs:
+            if x_word in inr_ncs and eval_cnd(
+                rule, cnd_ast, x_word, sigma_word, fs, inv
+            ):
                 out_names = _out_names_for(
                     out_ast, x_word, sigma_word, fs, inv, rule.Id
                 )
+                if rule.Dir == "R":
+                    # transduce reverses the whole output string, which would
+                    # also reverse a multi-segment chunk internally; undo that
+                    # here, as _compile_m_n0 does.
+                    out_names = list(reversed(out_names))
             else:
                 out_names = [inv.name_of(x_seg)]
             # Next state: new trigger if x ∈ L(Trm), else stay at q_σ
@@ -379,19 +404,20 @@ def _compile_n1_m1(
 
 
 # ---------------------------------------------------------------------------
-# Case 2: n≥1, m=0  (sliding buffer)
+# Case 2: m≥1, n=0  (sliding buffer)
 # ---------------------------------------------------------------------------
 
 
-def _compile_n_m0(
+def _compile_m_n0(
     rule: Rule,
     out_ast,
     fs: lp.FeatureSystem,
     inv: lp.Inventory,
     max_arcs: int,
     collapse_multisymbol_output: bool = False,
+    cnd_ast=None,
 ) -> pynini.Fst:
-    """Build the S&C FST for the n≥1, m=0 case using a sliding buffer.
+    """Build the S&C FST for the m≥1, n=0 case using a sliding buffer.
 
     Each state represents a tuple of segment names accumulated since the last
     match or flush.  When the buffer reaches length n:
@@ -414,7 +440,7 @@ def _compile_n_m0(
     """
     arc_count: list[int] = [0]
 
-    n = len(rule.Inr)
+    m = len(rule.Inr)
     dir_r = rule.Dir == "R"
     sym = _build_sym_table(inv)
     w = pynini.Weight.one("tropical")
@@ -452,13 +478,15 @@ def _compile_n_m0(
                 # Terminal boundary: either match or flush everything.
                 # This arc consumes the real terminal label so it cannot be
                 # taken mid-string, preventing nondeterministic early flushing.
-                if len(new_buf) == n:
+                if len(new_buf) == m:
                     buf_segs = [inv[nm] for nm in new_buf]
                     check_segs = (
                         list(reversed(buf_segs)) if dir_r else buf_segs
                     )
                     check_word = fs.word(check_segs)
-                    if check_word in inr_ncs:
+                    if check_word in inr_ncs and eval_cnd(
+                        rule, cnd_ast, check_word, fs.word([]), fs, inv
+                    ):
                         out_names = _out_names_for(
                             out_ast, check_word, fs.word([]), fs, inv, rule.Id
                         )
@@ -503,7 +531,7 @@ def _compile_n_m0(
                     queue.append(next_buf)
                 continue
 
-            if len(new_buf) < n:
+            if len(new_buf) < m:
                 # Buffer still filling — accumulate, emit nothing yet
                 next_buf = new_buf
                 _emit_chain(
@@ -526,7 +554,9 @@ def _compile_n_m0(
                 check_segs = list(reversed(buf_segs)) if dir_r else buf_segs
                 check_word = fs.word(check_segs)
 
-                if check_word in inr_ncs:
+                if check_word in inr_ncs and eval_cnd(
+                    rule, cnd_ast, check_word, fs.word([]), fs, inv
+                ):
                     out_names = _out_names_for(
                         out_ast, check_word, fs.word([]), fs, inv, rule.Id
                     )
@@ -611,24 +641,28 @@ def compile_rule(
     Raises:
         CompileError: If the rule is not compilable or exceeds max_arcs.
     """
+    check_wellformed(rule)
     _check_compilable(rule)
     out_ast = dsl.parse(rule.Out)
+    cnd_ast = dsl.parse(rule.Cnd) if rule.Cnd is not None else None
     if len(rule.Trm) == 0:
-        return _compile_n_m0(
+        return _compile_m_n0(
             rule,
             out_ast,
             fs,
             inv,
             max_arcs,
             collapse_multisymbol_output=no_epsilon_input_arcs,
+            cnd_ast=cnd_ast,
         )
-    return _compile_n1_m1(
+    return _compile_m1_n1(
         rule,
         out_ast,
         fs,
         inv,
         max_arcs,
         collapse_multisymbol_output=no_epsilon_input_arcs,
+        cnd_ast=cnd_ast,
     )
 
 

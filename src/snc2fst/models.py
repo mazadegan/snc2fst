@@ -24,6 +24,12 @@ class Rule(BaseModel):
     Trm: list[list[tuple[str, str]]]
     Dir: Literal["L", "R"]
     Out: str
+    # Optional licensing condition: a DSL expression over INR and TRM that
+    # must evaluate to a boolean. When it is false the matched INR-window does
+    # not fire and the scan slides past it by one, leaving the window's
+    # segments available to a later, overlapping match. Writing the same
+    # condition inside Out instead would consume the window either way.
+    Cnd: str | None = None
 
     def inr_as_ncs(self, fs: lp.FeatureSystem) -> lp.NaturalClassSequence:
         """Return the Inr specification as an LP NaturalClassSequence."""

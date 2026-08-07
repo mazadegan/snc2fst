@@ -129,8 +129,9 @@ def validate_cmd(config_file: Path) -> None:
     """Validate a grammar config and all supporting files."""
     from snc2fst.alphabet import load_alphabet
     from snc2fst.dsl import collect_errors, parse
-    from snc2fst.errors import ParseError, TokenizationError
+    from snc2fst.errors import ParseError, RuleError, TokenizationError
     from snc2fst.io import load_config, load_tests
+    from snc2fst.wellformed import wellformedness_errors
 
     errors: list[str] = []
     base_dir = config_file.parent
@@ -152,26 +153,45 @@ def validate_cmd(config_file: Path) -> None:
         click.echo(f"  [x] {config.alphabet_path}: {e}", err=True)
         raise click.Abort()
 
-    # Out expressions
+    # Rule shapes: Inr/Trm features, and the non-overlap condition
+    shape_errors: list[str] = []
+    for rule in config.rules:
+        for as_ncs in (rule.inr_as_ncs, rule.trm_as_ncs):
+            try:
+                as_ncs(fs)
+            except RuleError as e:
+                shape_errors.append(str(e))
+        shape_errors.extend(wellformedness_errors(rule))
+    errors.extend(shape_errors)
+
+    if not shape_errors:
+        click.echo("  [✓] All rules well-formed")
+
+    # Out and Cnd expressions
     valid_features = fs.valid_features
     valid_segments = set(inv.user_names)
+    out_errors: list[str] = []
     for rule in config.rules:
-        try:
-            out_ast = parse(rule.Out)
-            rule_errors = collect_errors(
-                out_ast,
-                rule_id=rule.Id,
-                inr_len=len(rule.Inr),
-                trm_len=len(rule.Trm),
-                valid_segments=valid_segments,
-                valid_features=set(valid_features),
-            )
-            errors.extend(rule_errors)
-        except (ParseError, TokenizationError) as e:
-            errors.append(f"Rule '{rule.Id}': {e}")
+        for source in (rule.Out, rule.Cnd):
+            if source is None:
+                continue
+            try:
+                out_errors.extend(
+                    collect_errors(
+                        parse(source),
+                        rule_id=rule.Id,
+                        inr_len=len(rule.Inr),
+                        trm_len=len(rule.Trm),
+                        valid_segments=valid_segments,
+                        valid_features=set(valid_features),
+                    )
+                )
+            except (ParseError, TokenizationError) as e:
+                out_errors.append(f"Rule '{rule.Id}': {e}")
+    errors.extend(out_errors)
 
-    if not errors:
-        click.echo("  [✓] All Out expressions valid")
+    if not out_errors:
+        click.echo("  [✓] All Out and Cnd expressions valid")
 
     # tests file
     try:
@@ -239,6 +259,19 @@ def eval_cmd(
         fs, inv = load_alphabet(config_file.parent / config.alphabet_path)
     except Exception as e:
         click.echo(f"[x] Failed to load alphabet: {e}", err=True)
+        raise click.Abort()
+
+    # Parse each rule's Out and Cnd once up front rather than per input word.
+    try:
+        rule_asts = {
+            rule.Id: (
+                parse(rule.Out),
+                parse(rule.Cnd) if rule.Cnd is not None else None,
+            )
+            for rule in config.rules
+        }
+    except Exception as e:
+        click.echo(f"[x] Failed to parse rule expression: {e}", err=True)
         raise click.Abort()
 
     # ------------------------------------------------------------------
@@ -311,8 +344,10 @@ def eval_cmd(
             current = tokenized
             steps = [inv.render(current)]
             for rule in config.rules:
-                out_ast = parse(rule.Out)
-                current = apply_rule(rule, out_ast, current, fs, inv)
+                out_ast, cnd_ast = rule_asts[rule.Id]
+                current = apply_rule(
+                    rule, out_ast, current, fs, inv, cnd_ast
+                )
                 steps.append(inv.render(current))
         return steps
 
@@ -391,16 +426,11 @@ def eval_cmd(
     # ------------------------------------------------------------------
     # Standard evaluator mode
     # ------------------------------------------------------------------
-    try:
-        out_asts = {rule.Id: parse(rule.Out) for rule in config.rules}
-    except Exception as e:
-        click.echo(f"[x] Failed to parse Out expression: {e}", err=True)
-        raise click.Abort()
-
     def apply_chain(input_word: str) -> str:
         w = _tokenize(input_word)
         for rule in config.rules:
-            w = apply_rule(rule, out_asts[rule.Id], w, fs, inv)
+            out_ast, cnd_ast = rule_asts[rule.Id]
+            w = apply_rule(rule, out_ast, w, fs, inv, cnd_ast)
         return inv.render(w)
 
     if word is not None:

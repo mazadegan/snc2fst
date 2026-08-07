@@ -38,6 +38,11 @@ select = ["E", "F", "I"]  # pycodestyle, pyflakes, isort
 [tool.ruff.format]
 quote-style = "double"
 
+[tool.pytest.ini_options]
+markers = [
+    "slow: exhaustive/randomized checks; deselect with '-m \"not slow\"'",
+]
+
 [tool.pyright] # pynini has incomplete type stubs, pyright complains otherwise.
 reportMissingModuleSource = false
 ignore = ["src/snc2fst/compiler.py"]

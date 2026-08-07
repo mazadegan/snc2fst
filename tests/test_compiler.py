@@ -28,6 +28,8 @@ Natural classes used in tests:
 # pyright: reportArgumentType=false
 # mypy: ignore-errors
 
+import warnings
+
 import logical_phonology as lp
 import pytest
 
@@ -75,8 +77,9 @@ def _eval_ref(rule: Rule, inp: list[str]) -> list[str]:
     Run the reference evaluator; return output as a list of segment names.
     """
     out_ast = dsl.parse(rule.Out)
+    cnd_ast = dsl.parse(rule.Cnd) if rule.Cnd is not None else None
     in_word = _FS.word([_INV[s] for s in inp])
-    out_word = apply_rule(rule, out_ast, in_word, _FS, _INV)
+    out_word = apply_rule(rule, out_ast, in_word, _FS, _INV, cnd_ast)
     return [_INV.name_of(seg) for seg in out_word]
 
 
@@ -132,7 +135,7 @@ def _assert_agrees_bounded(rule: Rule, inputs: list[list[str]]) -> None:
 
 
 # ---------------------------------------------------------------------------
-# n=1, m=1, Dir=L  — nasalization before nasal
+# m=1, n=1, Dir=L  — nasalization before nasal
 #
 # Rule: [+voc] → [+nas] / __ [+nas]
 # ---------------------------------------------------------------------------
@@ -179,7 +182,7 @@ def test_nasal_l_only_trigger():
 
 
 # ---------------------------------------------------------------------------
-# n=1, m=1, Dir=R  — nasalization after nasal (trigger to the right)
+# m=1, n=1, Dir=R  — nasalization after nasal (trigger to the right)
 #
 # Rule: [+voc] → [+nas] / [+nas] __
 # ---------------------------------------------------------------------------
@@ -210,7 +213,7 @@ def test_nasal_r_multiple():
 
 
 # ---------------------------------------------------------------------------
-# n=1, m=1 — target is also a potential trigger (harmony spread)
+# m=1, n=1 — target is also a potential trigger (harmony spread)
 #
 # Rule: [-voc] → [+lab] / __ [+lab]
 # ---------------------------------------------------------------------------
@@ -633,13 +636,13 @@ def test_chain_rl_sequential():
 # ---------------------------------------------------------------------------
 
 
-def test_compile_error_n0():
+def test_compile_error_m0():
     rule = Rule(Id="r", Inr=[], Trm=[], Dir="L", Out="INR")
     with pytest.raises(CompileError):
         compile_rule(rule, _FS, _INV)
 
 
-def test_compile_error_n2_m1():
+def test_compile_error_m2_n1():
     rule = Rule(
         Id="r", Inr=[["+voc"], ["+voc"]], Trm=[["+nas"]], Dir="L", Out="INR"
     )
@@ -647,7 +650,7 @@ def test_compile_error_n2_m1():
         compile_rule(rule, _FS, _INV)
 
 
-def test_compile_error_n1_m2():
+def test_compile_error_m1_n2():
     rule = Rule(
         Id="r",
         Inr=[["+voc"]],
@@ -755,3 +758,119 @@ def test_compiled_fst_symbol_tables_are_named(tmp_path) -> None:
     reloaded = pynini.Fst.read(str(path))
     assert reloaded.input_symbols().name() == "snc2fst_symbols"
     assert reloaded.output_symbols().name() == "snc2fst_symbols"
+
+
+# ---------------------------------------------------------------------------
+# Regressions: cases where the evaluator used to disagree with the FST
+# ---------------------------------------------------------------------------
+
+
+def test_overlap_resolves_from_the_dir_end():
+    """Dir=R must fire the *right-most* of two overlapping INR windows.
+
+    On 'm m m a' the windows at positions 1-2 and 2-3 overlap. Scanning
+    against Dir=R reaches 2-3 first, so it fires and the buffer reset
+    suppresses 1-2. The evaluator previously scanned left-to-right regardless
+    of Dir and produced 'm m b m a', disagreeing with the FST.
+    """
+    rule = Rule(
+        Id="ov",
+        Inr=[["+nas"], ["+nas"]],
+        Trm=[],
+        Dir="R",
+        Out="(INR[1:2] &b)",
+    )
+    assert _eval_ref(rule, _segs("m m m a")) == _segs("m m m b a")
+    _assert_agrees(rule, [_segs("m m m a"), _segs("m m m m"), _segs("m m")])
+
+
+def test_trigger_search_reads_the_input_not_the_rewritten_prefix():
+    """Theta is computed from the input word, not from partial output.
+
+    On 'b m b b' only the second segment is a +lab nasal trigger, so only the
+    third segment should be nasalized. The evaluator previously searched the
+    partially rewritten word, so the newly nasalized third segment acted as a
+    trigger for the fourth, producing 'b m m m'.
+    """
+    rule = Rule(
+        Id="fd",
+        Inr=[["-nas", "-voc"]],
+        Trm=[["+lab"]],
+        Dir="L",
+        Out="(unify (subtract INR[1] {-nas}) (proj TRM[1] (nas)))",
+    )
+    assert _eval_ref(rule, _segs("b m b b")) == _segs("b m m b")
+    _assert_agrees(rule, [_segs("b m b b"), _segs("b m b m b")])
+
+
+# ---------------------------------------------------------------------------
+# Cnd licensing expression
+# ---------------------------------------------------------------------------
+
+
+def test_cnd_agrees_between_evaluator_and_fst_m1_n1():
+    rule = Rule(
+        Id="cnd11",
+        Inr=[["-nas"]],
+        Trm=[["+nas"]],
+        Dir="L",
+        Out="&p",
+        Cnd="(in? TRM [{+lab}])",
+    )
+    _assert_agrees(
+        rule,
+        [_segs("b m b"), _segs("b n b"), _segs("a m b a"), _segs("b")],
+    )
+
+
+def test_cnd_agrees_between_evaluator_and_fst_m2_n0():
+    """The window that fails Cnd slides, so an overlapping one can fire."""
+    rule = Rule(
+        Id="cnd20",
+        Inr=[["+nas"], ["+nas"]],
+        Trm=[],
+        Dir="L",
+        Out="(&b &b)",
+        Cnd="(in? INR [{+nas} {+nas +lab}])",
+    )
+    _assert_agrees(
+        rule,
+        [_segs("n n m"), _segs("m m"), _segs("n n n"), _segs("n m n m")],
+    )
+
+
+def test_cnd_blocking_keeps_segments_out_of_the_alphabet():
+    """Out is never evaluated on a pair Cnd rejects, so segments reachable
+    only that way must not be added to the inventory."""
+    rule = Rule(
+        Id="cndalpha",
+        Inr=[["+voc"]],
+        Trm=[["+nas"]],
+        Dir="L",
+        Out="(unify (subtract INR[1] {-nas}) {+nas})",
+        Cnd="(in? TRM [{+voc}])",  # no segment is both +nas and +voc
+    )
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        compute_alphabets([rule], _FS, _INV)
+    assert not caught, [str(x.message) for x in caught]
+
+
+def test_dir_right_multisegment_output_chunk_is_not_reversed():
+    """A Dir=R rule inserting material must not reverse the chunk.
+
+    transduce reverses the whole output string for Dir=R, which would also
+    reverse each emitted chunk internally. _compile_m_n0 compensated for this;
+    _compile_m1_n1 did not, so '(INR[1] &a)' on 'm m m' produced
+    'a m a m a m' instead of 'm a m a m a'.
+    """
+    rule = Rule(
+        Id="chunk",
+        Inr=[["-voc"]],
+        Trm=[[]],
+        Dir="R",
+        Out="(INR[1] &a)",
+    )
+    assert _eval_ref(rule, _segs("m m m")) == _segs("m a m a m a")
+    _assert_agrees(rule, [_segs("m m m"), _segs("b"), _segs("a b a")])
+    _assert_agrees_no_eps(rule, [_segs("m m m"), _segs("a b a")])

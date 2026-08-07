@@ -142,3 +142,51 @@ def test_compile_att_uses_numeric_zero_for_epsilon(tmp_path: Path) -> None:
     for att_path in att_files:
         text = att_path.read_text()
         assert "<eps>" not in text
+
+
+def _copy_starter(tmp_path: Path, starter: str) -> Path:
+    target = tmp_path / starter
+    shutil.copytree(Path(str(STARTERS_PATH / starter)), target)
+    return target
+
+
+def test_validate_rejects_ill_formed_rule(tmp_path: Path) -> None:
+    """An Inr-window and a Trm-window that can share a position is rejected.
+
+    Dir=L with m=2 > n=1 puts offset 0 in D_Left, and (Inr[1], Trm[1]) is
+    (+Syllabic, +Syllabic) — compatible, so the rule is ill-formed.
+    """
+    target = _copy_starter(tmp_path, "votic_vowel_harmony")
+    config = target / "config.toml"
+    config.write_text(
+        config.read_text()
+        + "\n[[rules]]\n"
+        'Id = "BAD"\n'
+        'Dir = "L"\n'
+        'Inr = [["+Syllabic"], ["-Syllabic"]]\n'
+        'Trm = [["+Syllabic"]]\n'
+        'Out = "INR"\n'
+    )
+    result = CliRunner().invoke(main, ["validate", str(config)])
+    assert result.exit_code != 0
+    assert "BAD" in result.output
+    assert "overlap at offset 0" in result.output
+
+
+def test_validate_reports_unknown_feature_in_inr(tmp_path: Path) -> None:
+    """Unknown features in Inr/Trm used to surface only at eval/compile."""
+    target = _copy_starter(tmp_path, "votic_vowel_harmony")
+    config = target / "config.toml"
+    config.write_text(
+        config.read_text()
+        + "\n[[rules]]\n"
+        'Id = "BADFEAT"\n'
+        'Dir = "L"\n'
+        'Inr = [["+NoSuchFeature"]]\n'
+        "Trm = []\n"
+        'Out = "INR"\n'
+    )
+    result = CliRunner().invoke(main, ["validate", str(config)])
+    assert result.exit_code != 0
+    assert "BADFEAT" in result.output
+    assert "NoSuchFeature" in result.output

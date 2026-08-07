@@ -514,3 +514,100 @@ def test_eval_nested_conditional_outer_else() -> None:
 def test_apply_rule_empty_word() -> None:
     result = apply_rule(ASSIMILATION_R, ASSIMILATION_R_AST, w(), FS, INV)
     assert result == w()
+
+
+### Algorithm 3 edge cases ###
+
+
+def _apply(rule_dict, word):
+    rule = Rule.model_validate(rule_dict)
+    return apply_rule(rule, parse(rule.Out), word, FS, INV)
+
+
+def test_apply_rule_empty_inr_is_rejected() -> None:
+    """m=0 leaves the target buffer permanently below capacity."""
+    with pytest.raises(EvalError, match="Inr is empty"):
+        _apply(
+            {"Id": "r", "Inr": [], "Trm": [], "Dir": "L", "Out": "INR"},
+            w(A, B),
+        )
+
+
+def test_apply_rule_ill_formed_rule_is_rejected() -> None:
+    """Non-overlap is enforced at evaluation time too, not just at compile."""
+    with pytest.raises(EvalError, match="overlap at offset"):
+        _apply(
+            {
+                "Id": "r",
+                "Inr": [["+F"], ["-F"]],
+                "Trm": [["+F"]],
+                "Dir": "L",
+                "Out": "INR",
+            },
+            w(A, C),
+        )
+
+
+def test_apply_rule_zero_length_output_deletes() -> None:
+    """An Out producing no segments deletes its window and keeps scanning."""
+    result = _apply(
+        {
+            "Id": "r",
+            "Inr": [["+F"]],
+            "Trm": [],
+            "Dir": "L",
+            "Out": "INR[1:0]",
+        },
+        w(A, C, B, D),
+    )
+    assert result == w(C, D)  # A and B are +F and get deleted
+
+
+def test_apply_rule_deletes_every_position() -> None:
+    """Deleting the whole word terminates and yields the empty word."""
+    result = _apply(
+        {
+            "Id": "r",
+            "Inr": [[]],
+            "Trm": [],
+            "Dir": "L",
+            "Out": "INR[1:0]",
+        },
+        w(A, B, C),
+    )
+    assert result == w()
+
+
+def test_apply_rule_residual_buffer_is_flushed() -> None:
+    """A trailing partial window must still reach the output."""
+    result = _apply(
+        {
+            "Id": "r",
+            "Inr": [["+F"], ["+F"], ["+F"]],
+            "Trm": [],
+            "Dir": "L",
+            "Out": "&D",
+        },
+        w(A, B),  # only 2 of the 3 needed, plus BOS/EOS: never fires
+    )
+    assert result == w(A, B)
+
+
+def test_apply_rule_terminator_blocks_rather_than_being_skipped() -> None:
+    """An unlicensed nearest terminator is not searched past.
+
+    Out fires only when TRM is +G; the nearest +F to the left of the final D
+    is B (+F -G), so nothing should change even though A (+F +G) sits further
+    left.
+    """
+    result = _apply(
+        {
+            "Id": "r",
+            "Inr": [["-F"]],
+            "Trm": [["+F"]],
+            "Dir": "L",
+            "Out": "(if (in? TRM [{+G}]) &C INR)",
+        },
+        w(A, B, D),
+    )
+    assert result == w(A, B, D)
