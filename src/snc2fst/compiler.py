@@ -1,11 +1,28 @@
 """FST compiler for S&C rules (pynini backend).
 
-Supported cases:
-  m=1, n=1  — trigger-conditioned rewrite (assimilation, vowel harmony, ...)
-  m≥1, n=0  — unconditional rewrite (epenthesis, metathesis, ...)
+Every well-formed rule compiles, for any ``m = len(Inr) >= 1`` and
+``n = len(Trm) >= 0``.  A single construction (``_compile_general``) covers
+all of them; the former shape-specific builders were exactly its degenerate
+cases.  It is ``evaluator.apply_rule`` tabulated — that evaluator is the
+reference implementation, so a disagreement between the two is a bug here.
 
 For Dir=R, the same left-to-right FST is built and then used with reversed
 input/output, which correctly implements w → reverse(T(reverse(w))).
+
+Machine size
+------------
+A configuration is ``(B, T, p)``: the INR-window buffer, the TRM-window
+buffer, and the nearest licensed TRM-match.  Stored literally, ``p`` would
+range over all of ``L(Trm)`` and the configuration count would grow as
+``|Sigma|^(m + 2n - 2)`` — infeasible past n=1 on a realistic inventory
+(a 24-segment alphabet at m=3, n=2 needs ~1M arcs).
+
+Instead ``p`` is stored as a *behaviour class*: two TRM-windows share a state
+when no ``Out`` or ``Cnd`` can tell them apart (see ``snc2fst.quotient``).
+A rule reading TRM only through ``proj`` sees just the projected features, and
+a rule ignoring TRM entirely collapses to one class.  That buys back roughly a
+full unit of ``n`` — the 24-segment m=3, n=2 case drops to ~60k arcs.  The
+denoted relation is unchanged; only the state count is.
 
 Alphabet propagation
 --------------------
@@ -33,6 +50,7 @@ from snc2fst import dsl_ast as ast
 from snc2fst.errors import CompileError
 from snc2fst.evaluator import eval_cnd, evaluate
 from snc2fst.models import Rule
+from snc2fst.quotient import TrmQuotient, trm_quotient
 from snc2fst.wellformed import check_wellformed
 
 # ---------------------------------------------------------------------------
@@ -40,20 +58,49 @@ from snc2fst.wellformed import check_wellformed
 # ---------------------------------------------------------------------------
 
 
-def _check_compilable(rule: Rule) -> None:
-    """Reject rule shapes this backend cannot yet build an FST for.
+def _estimate_arcs(sigma: int, m: int, n: int, classes: int) -> int:
+    """Upper bound on the arcs the construction will emit.
 
-    Assumes ``rule`` is already known to be well-formed (``m >= 1`` and
-    non-overlapping); ``compile_rule`` checks that first.
+    A configuration is ``(B, T, p)``. ``B`` holds fewer than ``m`` segments
+    between steps and ``T`` fewer than ``n``, but both are suffixes of the
+    same scan history, so ``T`` is determined by ``B`` once ``|B| >= n-1``;
+    the reachable count is therefore
+    ``(classes + 1) * sum_k |Sigma|^max(k, n-1)`` rather than the product of
+    the two. One arc leaves each configuration per input symbol.
+
+    Approximate in both directions: pessimistic because not every pointer
+    class is jointly reachable with every buffer pair, optimistic because it
+    treats the TRM buffer as always full and ignores the extra arcs a
+    multi-symbol output chain adds. Measured against real builds it lands
+    within a few percent — close enough to make the rejection message useful,
+    which is all it is for. The in-loop guard in ``_emit_chain`` remains the
+    authoritative limit.
+    """
+    return sigma * (classes + 1) * sum(
+        sigma ** max(k, n - 1) for k in range(m)
+    )
+
+
+def _check_size(
+    rule: Rule, sigma: int, classes: int, max_arcs: int
+) -> None:
+    """Reject a rule whose machine would blow past the arc limit.
+
+    Checked up front so the failure names the shape and a workable limit,
+    rather than surfacing partway through construction as a bare count.
     """
     m, n = len(rule.Inr), len(rule.Trm)
-    if n == 0:
-        return  # m≥1, n=0: supported
-    if m == 1 and n == 1:
-        return  # m=1, n=1: supported
+    estimate = _estimate_arcs(sigma, m, n, classes)
+    if estimate <= max_arcs:
+        return
     raise CompileError(
-        f"Rule '{rule.Id}': (m={m}, n={n}) is not compilable. "
-        "Only (m≥1, n=0) and (m=1, n=1) are supported."
+        f"Rule '{rule.Id}': this rule needs roughly {estimate:,} arcs, "
+        f"above the limit of {max_arcs:,}. It has m={m}, n={n} over an "
+        f"alphabet of {sigma} symbols, and its Trm windows fall into "
+        f"{classes} distinct behaviour class(es); size grows roughly as "
+        f"|alphabet|^(m+n-1) x (classes+1), so n costs more than m. Either "
+        f"pass --max-arcs {estimate:,} (or higher), or narrow Inr/Trm so "
+        "fewer segments match."
     )
 
 
@@ -74,52 +121,19 @@ def _rule_output_segments(
     inv: lp.Inventory,
     cnd_ast: ast.Expr | None = None,
 ) -> list[lp.Segment]:
-    """Enumerate every distinct segment that Out can produce for this rule.
+    """Enumerate every segment that Out can produce for this rule.
 
-    For m=1, n=1: evaluates Out over all (inr_seg, trm_seg) pairs where
-    inr_seg ∈ L(Inr) and trm_seg ∈ L(Trm).
-
-    For m≥1, n=0: evaluates Out over all inr_word ∈ L(Inr) (no trigger).
-
-    Pairs the rule's licensing condition rejects are skipped: Out is never
-    evaluated on them at run time, so segments only reachable that way must
-    not be added to the alphabet.
+    Delegates to the terminator quotient, which walks exactly the licensed
+    (INR-window, TRM-window) pairs and collects their outputs along the way.
+    Pairs the rule's Cnd rejects are skipped, since Out is never evaluated on
+    them at run time and segments reachable only that way must not enter the
+    alphabet.
 
     BOS/EOS are included in the enumeration because rules may legitimately
     condition on boundaries, but boundary pseudo-segments are never added to
     the output inventory (they are always present in every inventory already).
     """
-    inr_ncs = rule.inr_as_ncs(fs)
-    produced: list[lp.Segment] = []
-
-    if len(rule.Trm) == 0:
-        # m≥1, n=0 — iterate over all words in L(Inr)
-        # filter_boundaries=False so boundary-conditioned rules work
-        for inr_word in inr_ncs.over(inv, filter_boundaries=False):
-            if rule.Dir == "R":
-                inr_word = fs.word(list(reversed(list(inr_word))))
-            empty = fs.word([])
-            if not eval_cnd(rule, cnd_ast, inr_word, empty, fs, inv):
-                continue
-            raw = evaluate(out_ast, inr_word, empty, fs, inv)
-            if isinstance(raw, lp.Word):
-                produced.extend(list(raw))  # type: ignore[arg-type]
-            # bool case (shouldn't happen during alphabet propagation) is silently ignored # noqa: E501
-    else:
-        # m=1, n=1 — iterate over all (inr, trm) pairs
-        trm_ncs = rule.trm_as_ncs(fs)
-        for inr_word in inr_ncs.over(inv, filter_boundaries=False):
-            for trm_word in trm_ncs.over(inv, filter_boundaries=False):
-                if not eval_cnd(
-                    rule, cnd_ast, inr_word, trm_word, fs, inv
-                ):
-                    continue
-                raw = evaluate(out_ast, inr_word, trm_word, fs, inv)
-                if isinstance(raw, lp.Word):
-                    produced.extend(list(raw))  # type: ignore[arg-type]
-                # bool case (shouldn't happen during alphabet propagation) is silently ignored # noqa: E501
-
-    return produced
+    return trm_quotient(rule, out_ast, cnd_ast, fs, inv).produced
 
 
 def _extend_inventory(
@@ -158,22 +172,31 @@ def compute_alphabets(
     fs: lp.FeatureSystem,
     base_inv: lp.Inventory,
 ) -> list[lp.Inventory]:
-    """Return the effective input inventory for each rule.
+    """Return the effective inventory for each rule's transducer.
 
-    ``alphabets[i]`` is the inventory rule ``i`` reads from — equal to
-    ``base_inv`` for ``i=0``, and the output inventory of rule ``i-1`` for
-    ``i>0``.
+    ``alphabets[i]`` is everything rule ``i``'s FST must be able to name: the
+    segments it can read (its input inventory, i.e. ``base_inv`` extended by
+    every earlier rule's output) *together with* the segments its own ``Out``
+    can produce.
+
+    Both halves are needed. Omitting the rule's own outputs — as this did
+    previously, by recording the inventory before extending it — left
+    ``_out_names_for`` unable to name a segment the rule itself synthesizes,
+    so any rule producing a novel segment failed to compile.
+
+    ``Out`` is still evaluated against the *input* inventory, so ``&name``
+    lookups resolve exactly where they did before.
     """
     alphabets: list[lp.Inventory] = []
     current = base_inv
     for rule in rules:
-        alphabets.append(current)
         out_ast = dsl.parse(rule.Out)
         cnd_ast = dsl.parse(rule.Cnd) if rule.Cnd is not None else None
         new_segs = _rule_output_segments(
             rule, out_ast, fs, current, cnd_ast
         )
         current = _extend_inventory(current, new_segs, rule.Id)
+        alphabets.append(current)
     return alphabets
 
 
@@ -295,11 +318,19 @@ def _out_names_for(
 
 
 # ---------------------------------------------------------------------------
-# Case 1: m=1, n=1  (trigger-conditioned rewrite)
+# BOS / EOS symbol names (used for boundary wrapping in transduce)
+# ---------------------------------------------------------------------------
+
+_BOS_NAME = "⋉"
+_EOS_NAME = "⋊"
+
+
+# ---------------------------------------------------------------------------
+# The compiled machine
 # ---------------------------------------------------------------------------
 
 
-def _compile_m1_n1(
+def _compile_general(
     rule: Rule,
     out_ast,
     fs: lp.FeatureSystem,
@@ -307,23 +338,44 @@ def _compile_m1_n1(
     max_arcs: int,
     collapse_multisymbol_output: bool = False,
     cnd_ast=None,
+    quotient: TrmQuotient | None = None,
 ) -> pynini.Fst:
-    """Build the S&C FST for the m=1, n=1 case.
+    """Build the S&C FST for any well-formed rule (m≥1, n≥0).
 
-    States:
-      q_f  — the "free" state (no pending trigger seen)
-      q_σ  — one state per segment σ ∈ L(Trm), representing "last seen σ"
+    This is ``evaluator.apply_rule`` tabulated. A configuration is
 
-    Transitions from q_f:
-      For each x in Σ: emit x unchanged; move to q_x if x ∈ L(Trm), else q_f.
+        (B, T, p)
 
-    Transitions from q_σ:
-      For each x in Σ:
-        If x ∈ L(Inr): emit Out(x, σ); move to q_x or q_σ.
-        Else:           emit x unchanged; move to q_x or q_σ.
+    where ``B`` holds up to ``m`` scanned segments (the candidate INR-window),
+    ``T`` up to ``n-1`` (the candidate TRM-window), and ``p`` identifies the
+    nearest licensed TRM-match, or is None when none has been seen. Per input
+    symbol the machine pushes onto ``B``; resolves ``B`` if it is full, either
+    firing (emitting Out and clearing ``B``) or sliding by one; and only then
+    latches ``T``/``p``. That order is load-bearing — latching first would let
+    a position license itself.
+
+    ``p`` is stored as an index into ``quotient.reps``, a behaviour class
+    rather than a literal window (see ``snc2fst.quotient``). Two TRM-windows
+    the rule cannot distinguish share a state, which is what keeps the machine
+    buildable: with literal windows the configuration count grows as
+    ``|Sigma|^(m + 2n - 2)`` and exceeds the arc limit at n=2 on a 24-segment
+    inventory.
+
+    Buffers are held in *read* order, which is word order for Dir=L but
+    reversed for Dir=R, since ``transduce`` feeds the machine a reversed
+    string. Both buffers are therefore flipped back to word order before being
+    matched, ``p`` is stored in word order so ``TRM[1]`` means what the DSL
+    says, and each Out chunk is flipped to tape order before emission.
+
+    Boundary handling: the terminal boundary symbol
+    is consumed as a real input label rather than via an epsilon arc, so the
+    residual flush cannot fire mid-string and make the machine
+    nondeterministic.
     """
     arc_count: list[int] = [0]
 
+    m, n = len(rule.Inr), len(rule.Trm)
+    dir_r = rule.Dir == "R"
     sym = _build_sym_table(inv)
     w = pynini.Weight.one("tropical")
     fst = pynini.Fst()
@@ -331,279 +383,139 @@ def _compile_m1_n1(
     inr_ncs = rule.inr_as_ncs(fs)
     trm_ncs = rule.trm_as_ncs(fs)
     all_segs = _all_segments(inv)
+    names = {seg: inv.name_of(seg) for seg in all_segs}
+    labels = {name: sym.find(name) for name in names.values()}
 
-    q_f = fst.add_state()
-    fst.set_start(q_f)
-    fst.set_final(q_f, w)
+    terminal_name = names[fs.BOS if dir_r else fs.EOS]
 
-    # One state per segment in L(Trm)
-    trm_states: dict[lp.Segment, int] = {}
-    for seg in all_segs:
-        word = fs.word([seg])
-        if word in trm_ncs:
-            s = fst.add_state()
-            fst.set_final(s, w)
-            trm_states[seg] = s
+    q = quotient or trm_quotient(rule, out_ast, cnd_ast, fs, inv)
 
-    # Transitions from q_f
-    for x_seg in all_segs:
-        xl = sym.find(inv.name_of(x_seg))
-        dst: int = trm_states[x_seg] if x_seg in trm_states else q_f
-        _emit_chain(
-            fst,
-            sym,
-            q_f,
-            xl,
-            [inv.name_of(x_seg)],
-            dst,
-            w,
-            rule.Id,
-            max_arcs,
-            arc_count,
-            collapse_multisymbol_output,
-        )
+    def to_word(buf: tuple[str, ...]) -> lp.Word:
+        """Read-order buffer -> word-order Word."""
+        segs = [inv[name] for name in buf]
+        return fs.word(list(reversed(segs)) if dir_r else segs)
 
-    # Transitions from each trigger state q_σ
-    for sigma_seg, q_sigma in trm_states.items():
-        sigma_word = fs.word([sigma_seg])
-        for x_seg in all_segs:
-            xl = sym.find(inv.name_of(x_seg))
-            x_word = fs.word([x_seg])
-            if x_word in inr_ncs and eval_cnd(
-                rule, cnd_ast, x_word, sigma_word, fs, inv
+    fire_memo: dict[tuple[tuple[str, ...], int | None], list[str] | None] = {}
+
+    def fire(buf: tuple[str, ...], p: int | None) -> list[str] | None:
+        """Tape-order output if this window fires, else None.
+
+        Note the distinction between None (did not fire) and [] (fired with
+        an empty output, i.e. a deletion rule) — callers must test ``is not
+        None``.
+        """
+        key = (buf, p)
+        if key in fire_memo:
+            return fire_memo[key]
+        result: list[str] | None = None
+        if p is not None:
+            target = to_word(buf)
+            trigger = q.reps[p]
+            if target in inr_ncs and eval_cnd(
+                rule, cnd_ast, target, trigger, fs, inv
             ):
-                out_names = _out_names_for(
-                    out_ast, x_word, sigma_word, fs, inv, rule.Id
+                result = _out_names_for(
+                    out_ast, target, trigger, fs, inv, rule.Id
                 )
-                if rule.Dir == "R":
-                    # transduce reverses the whole output string, which would
-                    # also reverse a multi-segment chunk internally; undo that
-                    # here, as _compile_m_n0 does.
-                    out_names = list(reversed(out_names))
+                if dir_r:
+                    result = list(reversed(result))
+        fire_memo[key] = result
+        return result
+
+    def latch(
+        tbuf: tuple[str, ...], p: int | None, name: str
+    ) -> tuple[tuple[str, ...], int | None]:
+        """Fold a scanned segment into the TRM buffer and pointer."""
+        if n == 0:
+            return tbuf, p  # no terminator to track
+        candidate = tbuf + (name,)
+        if len(candidate) < n:
+            return candidate, p
+        window = to_word(candidate)
+        if window in trm_ncs:
+            key = tuple(inv.name_of(seg) for seg in window)
+            # A window can match Trm yet be absent from class_of only if the
+            # quotient found no licensed windows at all, in which case the
+            # rule never fires and leaving p alone is correct.
+            p = q.class_of.get(key, p)
+        return candidate[1:], p
+
+    State = tuple[tuple[str, ...], tuple[str, ...], int | None]
+    state_map: dict[State, int] = {}
+
+    def get_state(key: State) -> int:
+        if key not in state_map:
+            state_map[key] = fst.add_state()
+        return state_map[key]
+
+    # With no terminator every position is trivially licensed, which the
+    # quotient represents as the single class holding the empty window.
+    start: State = ((), (), 0 if n == 0 else None)
+    fst.set_start(get_state(start))
+
+    queue: deque[State] = deque([start])
+    visited: set[State] = {start}
+
+    while queue:
+        buf, tbuf, p = queue.popleft()
+        src = get_state((buf, tbuf, p))
+
+        for x_seg in all_segs:
+            x_name = names[x_seg]
+            new_buf = buf + (x_name,)
+
+            if x_name == terminal_name:
+                # Terminal boundary: fire if the completed window licenses,
+                # otherwise flush everything buffered plus the terminal.
+                out_names = (
+                    fire(new_buf, p) if len(new_buf) == m else None
+                )
+                if out_names is None:
+                    out_names = list(new_buf)
+                next_buf: tuple[str, ...] = ()
+            elif len(new_buf) < m:
+                out_names = []  # still filling; emit nothing yet
+                next_buf = new_buf
             else:
-                out_names = [inv.name_of(x_seg)]
-            # Next state: new trigger if x ∈ L(Trm), else stay at q_σ
-            dst: int = trm_states[x_seg] if x_seg in trm_states else q_sigma
+                fired = fire(new_buf, p)
+                if fired is not None:
+                    out_names = fired
+                    next_buf = ()  # consume the whole window
+                else:
+                    out_names = [new_buf[0]]  # emit stale, slide by one
+                    next_buf = new_buf[1:]
+
+            next_tbuf, next_p = latch(tbuf, p, x_name)
+            dst: State = (next_buf, next_tbuf, next_p)
+
             _emit_chain(
                 fst,
                 sym,
-                q_sigma,
-                xl,
+                src,
+                labels[x_name],
                 out_names,
-                dst,
+                get_state(dst),
                 w,
                 rule.Id,
                 max_arcs,
                 arc_count,
                 collapse_multisymbol_output,
             )
+            if dst not in visited:
+                visited.add(dst)
+                queue.append(dst)
 
-    fst.set_input_symbols(sym)
-    fst.set_output_symbols(sym)
-    return fst
-
-
-# ---------------------------------------------------------------------------
-# Case 2: m≥1, n=0  (sliding buffer)
-# ---------------------------------------------------------------------------
-
-
-def _compile_m_n0(
-    rule: Rule,
-    out_ast,
-    fs: lp.FeatureSystem,
-    inv: lp.Inventory,
-    max_arcs: int,
-    collapse_multisymbol_output: bool = False,
-    cnd_ast=None,
-) -> pynini.Fst:
-    """Build the S&C FST for the m≥1, n=0 case using a sliding buffer.
-
-    Each state represents a tuple of segment names accumulated since the last
-    match or flush.  When the buffer reaches length n:
-      - If it models Inr: emit Out(...), reset buffer to ().
-      - Else: emit the oldest buffered segment, slide the buffer by one.
-
-    For Dir=R, input arrives reversed so the pattern check is also reversed.
-    Output is likewise reversed so that pynini.reverse restores order.
-
-    Boundary handling
-    -----------------
-    ``transduce`` always wraps every input with BOS (⋉) on the left and EOS
-    (⋊) on the right before feeding this FST.  The terminal boundary symbol
-    (EOS for Dir=L, BOS for Dir=R) is handled with a dedicated arc from every
-    non-empty buffer state: it either fires the rule (if the buffer + terminal
-    matches Inr) or flushes the entire buffer plus the terminal in one shot.
-    This means the terminal symbol is *consumed* as a real input label rather
-    than via an epsilon arc, which eliminates the mid-string nondeterminism
-    that would otherwise arise from epsilon-input flush arcs.
-    """
-    arc_count: list[int] = [0]
-
-    m = len(rule.Inr)
-    dir_r = rule.Dir == "R"
-    sym = _build_sym_table(inv)
-    w = pynini.Weight.one("tropical")
-    fst = pynini.Fst()
-
-    inr_ncs = rule.inr_as_ncs(fs)
-    all_segs = _all_segments(inv)
-
-    # Terminal boundary symbol: EOS for left-to-right, BOS for right-to-left.
-    terminal_seg = fs.BOS if dir_r else fs.EOS
-
-    state_map: dict[tuple[str, ...], int] = {}
-
-    def get_state(buf: tuple[str, ...]) -> int:
-        if buf not in state_map:
-            state_map[buf] = fst.add_state()
-        return state_map[buf]
-
-    start = get_state(())
-    fst.set_start(start)
-
-    queue: deque[tuple[str, ...]] = deque([()])
-    visited: set[tuple[str, ...]] = {()}
-
-    while queue:
-        buf = queue.popleft()
-        src = get_state(buf)
-
-        for x_seg in all_segs:
-            x_name = inv.name_of(x_seg)
-            xl = sym.find(x_name)
-            new_buf = buf + (x_name,)
-
-            if x_seg == terminal_seg:
-                # Terminal boundary: either match or flush everything.
-                # This arc consumes the real terminal label so it cannot be
-                # taken mid-string, preventing nondeterministic early flushing.
-                if len(new_buf) == m:
-                    buf_segs = [inv[nm] for nm in new_buf]
-                    check_segs = (
-                        list(reversed(buf_segs)) if dir_r else buf_segs
-                    )
-                    check_word = fs.word(check_segs)
-                    if check_word in inr_ncs and eval_cnd(
-                        rule, cnd_ast, check_word, fs.word([]), fs, inv
-                    ):
-                        out_names = _out_names_for(
-                            out_ast, check_word, fs.word([]), fs, inv, rule.Id
-                        )
-                        if dir_r:
-                            out_names = list(reversed(out_names))
-                        next_buf = ()
-                        _emit_chain(
-                            fst,
-                            sym,
-                            src,
-                            xl,
-                            out_names,
-                            get_state(next_buf),
-                            w,
-                            rule.Id,
-                            max_arcs,
-                            arc_count,
-                            collapse_multisymbol_output,
-                        )
-                        if next_buf not in visited:
-                            visited.add(next_buf)
-                            queue.append(next_buf)
-                        continue
-                # No match (or buffer too short): flush all buffered + terminal
-                flush_names = list(buf) + [x_name]
-                next_buf = ()
-                _emit_chain(
-                    fst,
-                    sym,
-                    src,
-                    xl,
-                    flush_names,
-                    get_state(next_buf),
-                    w,
-                    rule.Id,
-                    max_arcs,
-                    arc_count,
-                    collapse_multisymbol_output,
-                )
-                if next_buf not in visited:
-                    visited.add(next_buf)
-                    queue.append(next_buf)
-                continue
-
-            if len(new_buf) < m:
-                # Buffer still filling — accumulate, emit nothing yet
-                next_buf = new_buf
-                _emit_chain(
-                    fst,
-                    sym,
-                    src,
-                    xl,
-                    [],
-                    get_state(next_buf),
-                    w,
-                    rule.Id,
-                    max_arcs,
-                    arc_count,
-                    collapse_multisymbol_output,
-                )
-            else:
-                # Buffer full — check whether it models Inr
-                buf_segs = [inv[nm] for nm in new_buf]
-                # For Dir=R, input arrives reversed; check reversed buffer
-                check_segs = list(reversed(buf_segs)) if dir_r else buf_segs
-                check_word = fs.word(check_segs)
-
-                if check_word in inr_ncs and eval_cnd(
-                    rule, cnd_ast, check_word, fs.word([]), fs, inv
-                ):
-                    out_names = _out_names_for(
-                        out_ast, check_word, fs.word([]), fs, inv, rule.Id
-                    )
-                    if dir_r:
-                        out_names = list(reversed(out_names))
-                    next_buf = ()
-                else:
-                    # No match — emit oldest segment, slide buffer
-                    out_names = [new_buf[0]]
-                    next_buf = new_buf[1:]
-
-                _emit_chain(
-                    fst,
-                    sym,
-                    src,
-                    xl,
-                    out_names,
-                    get_state(next_buf),
-                    w,
-                    rule.Id,
-                    max_arcs,
-                    arc_count,
-                    collapse_multisymbol_output,
-                )
-
-            if next_buf not in visited:
-                visited.add(next_buf)
-                queue.append(next_buf)
-
-    # The empty buffer is the only accepting state.
-    # Non-empty buffer states are non-accepting: every valid path must consume
-    # the terminal boundary symbol (added by transduce) and reach () that way.
-    for buf, buf_state in state_map.items():
+    # Accepting exactly when no INR-window is left part-built. Composition
+    # against a linear acceptor only admits a path consuming all input, so
+    # marking several states final is harmless.
+    for (buf, _, _), state in state_map.items():
         if not buf:
-            fst.set_final(buf_state, w)
+            fst.set_final(state, w)
 
     fst.set_input_symbols(sym)
     fst.set_output_symbols(sym)
     return fst
 
-
-# ---------------------------------------------------------------------------
-# BOS / EOS symbol names (used for boundary wrapping in transduce)
-# ---------------------------------------------------------------------------
-
-_BOS_NAME = "⋉"
-_EOS_NAME = "⋊"
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -642,20 +554,13 @@ def compile_rule(
         CompileError: If the rule is not compilable or exceeds max_arcs.
     """
     check_wellformed(rule)
-    _check_compilable(rule)
     out_ast = dsl.parse(rule.Out)
     cnd_ast = dsl.parse(rule.Cnd) if rule.Cnd is not None else None
-    if len(rule.Trm) == 0:
-        return _compile_m_n0(
-            rule,
-            out_ast,
-            fs,
-            inv,
-            max_arcs,
-            collapse_multisymbol_output=no_epsilon_input_arcs,
-            cnd_ast=cnd_ast,
-        )
-    return _compile_m1_n1(
+    # The quotient is needed for the size estimate anyway, so compute it once
+    # here and hand it to the builder rather than letting it recompute.
+    quotient = trm_quotient(rule, out_ast, cnd_ast, fs, inv)
+    _check_size(rule, len(_all_segments(inv)), len(quotient.reps), max_arcs)
+    return _compile_general(
         rule,
         out_ast,
         fs,
@@ -663,6 +568,7 @@ def compile_rule(
         max_arcs,
         collapse_multisymbol_output=no_epsilon_input_arcs,
         cnd_ast=cnd_ast,
+        quotient=quotient,
     )
 
 

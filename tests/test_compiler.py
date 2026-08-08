@@ -36,12 +36,14 @@ import pytest
 from snc2fst import dsl
 from snc2fst.compiler import (
     CompileError,
+    _estimate_arcs,
     compile_rule,
     compute_alphabets,
     transduce,
 )
 from snc2fst.evaluator import apply_rule
 from snc2fst.models import Rule
+from snc2fst.quotient import trm_quotient
 
 pynini = pytest.importorskip("pynini", reason="pynini not installed")
 
@@ -642,15 +644,18 @@ def test_compile_error_m0():
         compile_rule(rule, _FS, _INV)
 
 
-def test_compile_error_m2_n1():
+def test_compile_error_overlapping_m2_n1():
+    """Rejected for non-overlap, not for shape: Dir=L with m>n puts offset 0
+    in D_Left, and (Inr[1], Trm[1]) = (+voc, +nas) is compatible."""
     rule = Rule(
         Id="r", Inr=[["+voc"], ["+voc"]], Trm=[["+nas"]], Dir="L", Out="INR"
     )
-    with pytest.raises(CompileError):
+    with pytest.raises(CompileError, match="overlap at offset"):
         compile_rule(rule, _FS, _INV)
 
 
-def test_compile_error_m1_n2():
+def test_compile_error_overlapping_m1_n2():
+    """Same, at the negative offset -1."""
     rule = Rule(
         Id="r",
         Inr=[["+voc"]],
@@ -658,8 +663,27 @@ def test_compile_error_m1_n2():
         Dir="L",
         Out="INR",
     )
-    with pytest.raises(CompileError):
+    with pytest.raises(CompileError, match="overlap at offset"):
         compile_rule(rule, _FS, _INV)
+
+
+def test_non_overlapping_m2_n1_now_compiles():
+    """The same shapes are compilable once they satisfy non-overlap."""
+    rule = Rule(
+        Id="r", Inr=[["+voc"], ["+voc"]], Trm=[["-voc"]], Dir="L", Out="INR"
+    )
+    _assert_agrees(rule, [_segs("b a a"), _segs("a a"), _segs("b a a a")])
+
+
+def test_non_overlapping_m1_n2_now_compiles():
+    rule = Rule(
+        Id="r",
+        Inr=[["+voc"]],
+        Trm=[["-voc"], ["-voc"]],
+        Dir="L",
+        Out="&p",
+    )
+    _assert_agrees(rule, [_segs("b p a"), _segs("a b p a"), _segs("a")])
 
 
 # ---------------------------------------------------------------------------
@@ -860,8 +884,8 @@ def test_dir_right_multisegment_output_chunk_is_not_reversed():
     """A Dir=R rule inserting material must not reverse the chunk.
 
     transduce reverses the whole output string for Dir=R, which would also
-    reverse each emitted chunk internally. _compile_m_n0 compensated for this;
-    _compile_m1_n1 did not, so '(INR[1] &a)' on 'm m m' produced
+    reverse each emitted chunk internally. The n=0 builder compensated for
+    this; the (m=1,n=1) one did not, so '(INR[1] &a)' on 'm m m' produced
     'a m a m a m' instead of 'm a m a m a'.
     """
     rule = Rule(
@@ -874,3 +898,283 @@ def test_dir_right_multisegment_output_chunk_is_not_reversed():
     assert _eval_ref(rule, _segs("m m m")) == _segs("m a m a m a")
     _assert_agrees(rule, [_segs("m m m"), _segs("b"), _segs("a b a")])
     _assert_agrees_no_eps(rule, [_segs("m m m"), _segs("a b a")])
+
+
+# ---------------------------------------------------------------------------
+# Alphabet propagation
+# ---------------------------------------------------------------------------
+
+
+def _added_by_alphabet_pass(rule: Rule) -> list[str]:
+    """Segment names compute_alphabets adds beyond the base inventory."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        inv = compute_alphabets([rule], _FS, _INV)[0]
+    return sorted(set(inv.name_to_segment) - set(_INV.name_to_segment))
+
+
+def test_alphabet_pass_does_not_reverse_the_inr_window_for_dir_r():
+    """L(Inr) is in word order under both directions.
+
+    The pass used to reverse the window for Dir=R while the builder
+    reconstructs word order before evaluating Out, so the two disagreed about
+    which segments Out could produce — inventing some and missing others.
+    """
+    for inr in ([["+voc"], ["+lab"]], [["+lab"], ["+voc"]]):
+        rule_l = Rule(
+            Id="l", Inr=inr, Trm=[], Dir="L", Out="(subtract INR[1] {+lab})"
+        )
+        rule_r = Rule(
+            Id="r", Inr=inr, Trm=[], Dir="R", Out="(subtract INR[1] {+lab})"
+        )
+        assert _added_by_alphabet_pass(rule_l) == _added_by_alphabet_pass(
+            rule_r
+        ), f"Dir disagreement for Inr={inr}"
+
+
+def test_rule_inventory_contains_its_own_novel_output():
+    """A rule whose Out synthesizes a new segment must still compile.
+
+    compute_alphabets used to record each rule's inventory *before* extending
+    it with that rule's own outputs, so _out_names_for could not name a
+    segment the rule itself produced.
+    """
+    rule = Rule(
+        Id="epen", Inr=[["+voc"]], Trm=[], Dir="L", Out="(INR[1] {+nas})"
+    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        inv = compute_alphabets([rule], _FS, _INV)[0]
+        compile_rule(rule, _FS, inv)  # must not raise
+    assert set(inv.name_to_segment) > set(_INV.name_to_segment)
+
+
+def test_alphabets_stay_monotone_across_a_chain():
+    """Rule i's inventory must contain rule i-1's, or transduce cannot chain
+    output names from one FST into the next."""
+    r1 = Rule(
+        Id="r1", Inr=[["+voc"]], Trm=[], Dir="L", Out="(INR[1] {+nas})"
+    )
+    r2 = Rule(
+        Id="r2", Inr=[["-voc"]], Trm=[], Dir="L", Out="(INR[1] {+lab})"
+    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        alphabets = compute_alphabets([r1, r2], _FS, _INV)
+    assert set(alphabets[0].name_to_segment) <= set(
+        alphabets[1].name_to_segment
+    )
+
+
+# ---------------------------------------------------------------------------
+# General case: m >= 1, n >= 1
+# ---------------------------------------------------------------------------
+
+
+def test_general_dir_r_reverses_the_trm_buffer():
+    """The TRM window is matched in word order under Dir=R too.
+
+    The machine reads a reversed string, so its TRM buffer fills backwards and
+    must be flipped before matching. Trm here is nasal-then-labial in word
+    order: 'a m b' must fire and 'a b m' must not. Without the flip the two
+    swap, which is silent — both still produce *some* output.
+    """
+    rule = Rule(
+        Id="tr",
+        Inr=[["+voc"]],
+        Trm=[["-voc", "+nas"], ["-voc", "+lab"]],
+        Dir="R",
+        Out="(TRM[1] INR[1] TRM[2])",
+    )
+    assert _eval_ref(rule, _segs("a m b")) == _segs("m a b m b")
+    assert _eval_ref(rule, _segs("a b m")) == _segs("a b m")
+    _assert_agrees(
+        rule,
+        [_segs("a m b"), _segs("a b m"), _segs("a n b"), _segs("a p m b")],
+    )
+
+
+def test_general_paper_worked_trace():
+    """The paper's worked trace (Section 5.1).
+
+    Inr = [V, C, V], Trm = Cnd = [C, C], Dir = R, Out keeps the first two
+    segments — deleting the second vowel of a VCV sequence when a consonant
+    cluster follows. On <V,C,V,C,V,C,C> two INR windows are licensed but only
+    the rightmost fires, giving <V,C,V,C,C,C>.
+    """
+    rule = Rule(
+        Id="kdel",
+        Inr=[["+voc"], ["-voc"], ["+voc"]],
+        Trm=[["-voc"], ["-voc"]],
+        Dir="R",
+        Out="INR[1:2]",
+    )
+    assert _eval_ref(rule, _segs("a b a b a b b")) == _segs("a b a b b b")
+    _assert_agrees(
+        rule,
+        [_segs("a b a b a b b"), _segs("a b a b b"), _segs("a b a"), []],
+    )
+
+
+_GENERAL_CASES = [
+    # (label, rule, inputs)
+    (
+        "m2_n1_metathesis",
+        Rule(
+            Id="g",
+            Inr=[["-voc", "+lab"], ["-voc", "-lab"]],
+            Trm=[["+voc"]],
+            Dir="L",
+            Out="(INR[2] INR[1])",
+        ),
+        ["a m n a", "m n", "a b p a b p"],
+    ),
+    (
+        "m1_n2_projection",
+        Rule(
+            Id="g",
+            Inr=[["+voc"]],
+            Trm=[["-voc"], ["-voc"]],
+            Dir="L",
+            Out="(unify INR[1] (proj TRM[1] (nas)))",
+        ),
+        ["m n a", "b p a a", "a"],
+    ),
+    (
+        "m2_n2_dir_r",
+        Rule(
+            Id="g",
+            Inr=[["+voc"], ["-voc"]],
+            Trm=[["+voc"], ["+voc"]],
+            Dir="R",
+            Out="(INR[1] &p)",
+        ),
+        ["a b a a", "a m a a b", "a b"],
+    ),
+    (
+        "deletion_output",
+        Rule(
+            Id="g",
+            Inr=[["+voc"], ["-voc"]],
+            Trm=[["-voc"]],
+            Dir="L",
+            Out="INR[1:0]",
+        ),
+        ["a b a", "a a b a b", "a b"],
+    ),
+    (
+        "cnd_gated",
+        Rule(
+            Id="g",
+            Inr=[["+voc"], ["-voc"]],
+            Trm=[["-voc"]],
+            Dir="L",
+            Out="(&p &p)",
+            Cnd="(in? TRM [{-nas}])",
+        ),
+        ["a b a", "a m a b a"],
+    ),
+    (
+        "insertion_output",
+        Rule(
+            Id="g",
+            Inr=[["+voc"], ["-voc"]],
+            Trm=[["-voc"]],
+            Dir="L",
+            Out="(INR[1] &a INR[2])",
+        ),
+        ["a b a", "a b a b"],
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "rule,inputs",
+    [(r, i) for _, r, i in _GENERAL_CASES],
+    ids=[label for label, _, _ in _GENERAL_CASES],
+)
+def test_general_agrees_with_evaluator(rule, inputs):
+    _assert_agrees(rule, [_segs(s) for s in inputs])
+
+
+@pytest.mark.parametrize(
+    "rule,inputs",
+    [(r, i) for _, r, i in _GENERAL_CASES],
+    ids=[label for label, _, _ in _GENERAL_CASES],
+)
+def test_general_agrees_without_epsilon_input_arcs(rule, inputs):
+    _assert_agrees_no_eps(rule, [_segs(s) for s in inputs])
+
+
+def test_general_boundary_in_trm():
+    rule = Rule(
+        Id="g",
+        Inr=[["+voc"]],
+        Trm=[["+EOS"]],
+        Dir="R",
+        Out="(unify INR[1] {+nas})",
+    )
+    _assert_agrees_bounded(rule, [_segs("a b a"), _segs("b a")])
+
+
+def test_general_unsatisfiable_trm_never_fires():
+    """No segment is both +BOS and +voc, so nothing licenses."""
+    rule = Rule(
+        Id="g",
+        Inr=[["+voc"]],
+        Trm=[["+BOS", "+voc"]],
+        Dir="L",
+        Out="&p",
+    )
+    assert _eval_ref(rule, _segs("a b a")) == _segs("a b a")
+    _assert_agrees(rule, [_segs("a b a"), _segs("a")])
+
+
+# ---------------------------------------------------------------------------
+# Size estimation
+# ---------------------------------------------------------------------------
+
+
+def test_estimate_arcs_is_close_to_the_real_build():
+    """The estimate only has to be the right order of magnitude, but it is
+    much better than that in practice."""
+    rule = Rule(
+        Id="e",
+        Inr=[["-voc"]],
+        Trm=[["+voc"]],
+        Dir="L",
+        Out="(unify INR[1] (proj TRM[1] (nas)))",
+    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        inv = compute_alphabets([rule], _FS, _INV)[0]
+        fst = compile_rule(rule, _FS, inv, max_arcs=10**9)
+    actual = sum(fst.num_arcs(s) for s in fst.states())
+    classes = len(
+        trm_quotient(rule, dsl.parse(rule.Out), None, _FS, inv).reps
+    )
+    estimate = _estimate_arcs(len(inv.segment_to_name), 1, 1, classes)
+    assert 0.5 * actual <= estimate <= 2 * actual
+
+
+def test_oversized_rule_is_rejected_with_an_actionable_message():
+    """The rejection names the shape, the class count and a limit that works,
+    instead of surfacing as a bare count partway through construction."""
+    rule = Rule(
+        Id="BIG",
+        Inr=[["-voc"], ["-voc"], ["-voc"]],
+        Trm=[["+voc"], ["+voc"]],
+        Dir="L",
+        Out="(INR[1] TRM)",  # bare TRM: the quotient collapses nothing
+    )
+    with pytest.raises(CompileError) as excinfo:
+        compile_rule(rule, _FS, _INV, max_arcs=100)
+    message = str(excinfo.value)
+    assert "m=3, n=2" in message
+    assert "behaviour class" in message
+    assert "--max-arcs" in message
+
+
+def test_size_guard_lets_ordinary_rules_through():
+    for rule in (NASAL_L, NASAL_R, LAB_HARMONY, EPENTHESIS, METATHESIS_L):
+        compile_rule(rule, _FS, _INV)  # must not raise

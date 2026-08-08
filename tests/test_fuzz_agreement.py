@@ -52,6 +52,9 @@ _CLASSES = [
 ]
 
 # Outputs spanning identity, substitution, deletion, insertion and reordering.
+# Outputs by INR-window length. The TRM-reading ones matter most: `proj`
+# exercises the collapsing path of the terminator quotient, while a bare TRM
+# collapses nothing, so both sides of that optimization get covered.
 _OUTS_M1 = [
     "INR",
     "&p",
@@ -60,6 +63,11 @@ _OUTS_M1 = [
     "(unify INR[1] {+nas})",
     "(subtract INR[1] {+lab})",
 ]
+_OUTS_M1_TRM = [
+    "(unify INR[1] (proj TRM[1] (nas)))",  # lossy read: quotient collapses
+    "(TRM[1] INR[1])",
+    "(INR[1] TRM)",  # verbatim read: quotient collapses nothing
+]
 _OUTS_M2 = [
     "INR",
     "INR[1:0]",
@@ -67,37 +75,91 @@ _OUTS_M2 = [
     "(INR[1] &a INR[2])",
     "INR[1:1]",
 ]
+_OUTS_M2_TRM = [
+    "(INR[2] TRM[1] INR[1])",
+    "(unify INR[1] (proj TRM[1] (lab)))",
+]
+_OUTS_M3 = ["INR", "INR[1:2]", "(INR[3] INR[2] INR[1])"]
 _CNDS = [None, "(in? INR [{+nas}])", "(in? TRM [{+lab}])"]
 
+# (m, n) shapes to sweep. n costs more than m in state count, so the sweep is
+# deliberately lopsided.
+_SHAPES = [(1, 1), (2, 1), (1, 2), (2, 2), (3, 1), (1, 3), (3, 2), (2, 3)]
 
-def _words(rng, count, max_len=5):
-    out = [[], ["a"], ["m", "m", "m"]]
+# Per (shape, Dir), how many well-formed rules to keep. Non-overlap rejects
+# most generated rules, but at m=1 with Dir=R it rejects none (D_Right is
+# empty), so those shapes would otherwise dominate the run.
+_RULES_PER_SHAPE = 22
+
+
+def _words(rng, count, max_len=6):
+    out = [[], ["a"], ["m", "m", "m"], ["a", "b", "a", "b", "a"]]
     for _ in range(count):
         length = rng.randint(1, max_len)
         out.append([rng.choice(_NAMES) for _ in range(length)])
     return out
 
 
-def _rules():
-    """Every compilable shape this backend supports, in a fixed order."""
-    # m = 1, n = 1
-    for inr, trm, direction, out, cnd in itertools.product(
-        _CLASSES, _CLASSES, ("L", "R"), _OUTS_M1, _CNDS
-    ):
-        yield Rule(
-            Id="f", Inr=[inr], Trm=[trm], Dir=direction, Out=out, Cnd=cnd
-        )
-    # m >= 1, n = 0
-    for inr, direction, out, cnd in itertools.product(
-        _CLASSES, ("L", "R"), _OUTS_M1, _CNDS
-    ):
-        yield Rule(Id="f", Inr=[inr], Trm=[], Dir=direction, Out=out, Cnd=cnd)
-    for inr1, inr2, direction, out in itertools.product(
-        _CLASSES, _CLASSES, ("L", "R"), _OUTS_M2
-    ):
-        yield Rule(
-            Id="f", Inr=[inr1, inr2], Trm=[], Dir=direction, Out=out
-        )
+def _outs_for(m: int, n: int) -> list[str]:
+    if m == 1:
+        base = list(_OUTS_M1)
+        return base + (_OUTS_M1_TRM if n else [])
+    if m == 2:
+        base = list(_OUTS_M2)
+        return base + (_OUTS_M2_TRM if n else [])
+    return list(_OUTS_M3)
+
+
+def _rules(rng):
+    """Well-formed rules across every supported shape, in a fixed order."""
+    # n = 0: the unconditional-rewrite builder.
+    for m in (1, 2, 3):
+        for inr in itertools.product(_CLASSES, repeat=m):
+            for direction in ("L", "R"):
+                for out in _outs_for(m, 0):
+                    cnds = _CNDS if m == 1 else [None]
+                    for cnd in cnds:
+                        rule = Rule(
+                            Id="f",
+                            Inr=list(inr),
+                            Trm=[],
+                            Dir=direction,
+                            Out=out,
+                            Cnd=cnd,
+                        )
+                        if not wellformedness_errors(rule):
+                            yield rule
+
+    # n >= 1: the general builder. Subsample the (Inr, Trm) pairs per shape so
+    # no single shape dominates, then cross with every output.
+    for m, n in _SHAPES:
+        for direction in ("L", "R"):
+            pairs = [
+                (list(inr), list(trm))
+                for inr in itertools.product(_CLASSES, repeat=m)
+                for trm in itertools.product(_CLASSES, repeat=n)
+                if not wellformedness_errors(
+                    Rule(
+                        Id="f",
+                        Inr=list(inr),
+                        Trm=list(trm),
+                        Dir=direction,
+                        Out="INR",
+                    )
+                )
+            ]
+            rng.shuffle(pairs)
+            for inr, trm in pairs[:_RULES_PER_SHAPE]:
+                for out in _outs_for(m, n):
+                    for cnd in _CNDS:
+                        yield Rule(
+                            Id="f",
+                            Inr=inr,
+                            Trm=trm,
+                            Dir=direction,
+                            Out=out,
+                            Cnd=cnd,
+                        )
 
 
 def _reference(rule, inv, names):
@@ -111,20 +173,18 @@ def _reference(rule, inv, names):
 @pytest.mark.slow
 def test_evaluator_and_fst_agree_over_random_rules_and_words():
     rng = random.Random(20260807)
-    words = _words(rng, count=12)
+    words = _words(rng, count=11)
 
     checked = 0
     disagreements: list[str] = []
 
-    for rule in _rules():
+    for rule in _rules(rng):
         if wellformedness_errors(rule):
             continue
         try:
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
-                # Give the rule an inventory closed under its own output, so
-                # novel segments are nameable on both sides.
-                inv = compute_alphabets([rule, rule], _FS, _INV)[1]
+                inv = compute_alphabets([rule], _FS, _INV)[0]
                 fst = compile_rule(rule, _FS, inv)
         except CompileError:
             continue
@@ -150,7 +210,7 @@ def test_evaluator_and_fst_agree_over_random_rules_and_words():
                     f"/{rule.Cnd} on {names}: FST={got} evaluator={ref}"
                 )
 
-    assert checked > 5000, f"fuzz coverage too thin: only {checked} cases"
+    assert checked > 40000, f"fuzz coverage too thin: only {checked} cases"
     assert not disagreements, (
         f"{len(disagreements)} disagreement(s) out of {checked} cases; "
         f"first 10:\n" + "\n".join(disagreements[:10])
